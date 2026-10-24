@@ -27,6 +27,8 @@ import {
   UserCheck, 
   ToggleLeft,
   ToggleRight,
+  ExternalLink,
+  Copy,
   X
 } from 'lucide-react';
 
@@ -34,13 +36,14 @@ interface Transaction {
   hash: string;
   from: string;
   to: string;
-  value: string;
-  rawAmount: number;
+  valueDisplay: string;
+  numericEth: number;
   timestamp: number;
   type: 'incoming' | 'outgoing';
   tokenSymbol: string;
   category: string;
   feeEth: string;
+  numericFeeEth: number;
   transactionType: string;
 }
 
@@ -80,12 +83,10 @@ interface MemoryProfileData {
 }
 
 interface MonthlySummary {
+  hasActivity: boolean;
   currentMonthTotalEth: string;
-  lastMonthTotalEth: string;
-  diffPercent: number;
   totalFeesEth: string;
-  feeStatus: string;
-  monthlyBudgetEth: number;
+  diffPercentDisplay: string;
   changeNote: string;
   categories: Array<{
     name: string;
@@ -112,7 +113,7 @@ export function App() {
   const [hasTatumKey, setHasTatumKey] = useState<boolean>(true);
 
   // Wallet Data
-  const [balance, setBalance] = useState<string>('4.8250');
+  const [balance, setBalance] = useState<string>('0.0000');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [monthlySummary, setMonthlySummary] = useState<MonthlySummary | null>(null);
 
@@ -160,6 +161,13 @@ export function App() {
     setTimeout(() => setSuccessToast(null), 3500);
   };
 
+  const copyToClipboard = (text: string, label: string) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      showToast(`Copied ${label} to clipboard!`);
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
     loadAllData(activeAddress, demoMode);
@@ -189,6 +197,9 @@ export function App() {
       if (balanceRes.ok) {
         const bData = await balanceRes.json();
         setBalance(bData.balance || '0.0000');
+      } else {
+        const errJson = await balanceRes.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to fetch wallet balance from Tatum');
       }
 
       // 2. Transactions
@@ -199,6 +210,9 @@ export function App() {
         const tData = await txRes.json();
         fetchedTxs = tData.transactions || [];
         setTransactions(fetchedTxs);
+      } else {
+        const errJson = await txRes.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to fetch transaction records from Tatum');
       }
 
       // 3. Monthly Summary
@@ -232,7 +246,7 @@ export function App() {
         setAlerts(wData.alerts || []);
       }
     } catch (err: any) {
-      setApiError(err.message || 'Error communicating with server.');
+      setApiError(err.message || 'Error communicating with Tatum API.');
     } finally {
       setLoading(false);
     }
@@ -242,7 +256,7 @@ export function App() {
     const nextDemo = !demoMode;
     setDemoMode(nextDemo);
     loadAllData(activeAddress, nextDemo);
-    showToast(nextDemo ? 'Demo mode enabled with realistic watch records.' : 'Demo mode disabled: using live API.');
+    showToast(nextDemo ? 'Demo mode enabled (Sample data).' : 'Live mode enabled (Tatum API).');
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -250,6 +264,10 @@ export function App() {
     if (!addressInput.trim()) return;
     setActiveAddress(addressInput.trim());
     loadAllData(addressInput.trim(), demoMode);
+  };
+
+  const handleRetry = () => {
+    loadAllData(activeAddress, demoMode);
   };
 
   const handleTrustAddress = async (addressToTrust: string, name?: string, category?: string) => {
@@ -331,8 +349,7 @@ export function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: textToSend,
-          address: activeAddress,
-          demoMode
+          address: activeAddress
         })
       });
 
@@ -374,6 +391,7 @@ export function App() {
   };
 
   const formatTimeAgo = (timestamp: number) => {
+    if (!timestamp) return 'n/a';
     const diffSec = Math.floor((Date.now() - timestamp) / 1000);
     if (diffSec < 60) return 'Just now';
     const diffMin = Math.floor(diffSec / 60);
@@ -386,7 +404,7 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-secondary text-primary flex flex-col font-sans pb-11xl">
-      {/* Toast Notification (per toast.md: rounded-lg border border-secondary bg-primary p-lg shadow-lg) */}
+      {/* Toast Notification */}
       {successToast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-start gap-sm rounded-lg border border-secondary bg-primary p-lg shadow-lg">
           <CheckCircle2 className="mt-xxs size-4 shrink-0 text-fg-success-primary" aria-hidden="true" />
@@ -399,21 +417,29 @@ export function App() {
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center gap-sm">
             <div className="w-8 h-8 rounded-lg bg-brand-solid flex items-center justify-center text-primary-on-brand shadow-xs">
-              <ShieldAlert className="w-4 h-4 text-fg-white shrink-0" />
+              <ShieldAlert className="size-4 text-fg-white shrink-0" />
             </div>
             <div>
               <div className="flex items-center gap-xs">
                 <span className="text-md font-semibold text-primary tracking-tight">Ledger Memory</span>
-                <span className="inline-flex items-center gap-xs rounded-full border border-utility-brand-200 bg-utility-brand-50 px-md py-xxs text-xs font-medium text-utility-brand-700">
-                  Watchdog
-                </span>
+                {/* Visible Data Source Badge */}
+                {demoMode ? (
+                  <span className="inline-flex items-center gap-xs rounded-full border border-utility-brand-200 bg-utility-brand-50 px-md py-xxs text-xs font-medium text-utility-brand-700">
+                    Sample data
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-xs rounded-full border border-utility-success-200 bg-utility-success-50 px-md py-xxs text-xs font-medium text-utility-success-700">
+                    <span className="w-1.5 h-1.5 rounded-full bg-success-primary animate-pulse" />
+                    Live data from Tatum
+                  </span>
+                )}
               </div>
               <p className="text-xs text-tertiary">Expense watchdog & memory guardian</p>
             </div>
           </div>
 
           <div className="flex items-center gap-xs">
-            {/* Demo Mode Toggle Button (per button.md secondary) */}
+            {/* Demo Mode Toggle Button */}
             <button
               type="button"
               onClick={handleToggleDemo}
@@ -436,7 +462,7 @@ export function App() {
               )}
             </button>
 
-            {/* Config modal button (per button.md secondary) */}
+            {/* Config modal button */}
             <button
               type="button"
               onClick={() => setShowConfigModal(true)}
@@ -451,53 +477,51 @@ export function App() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-md w-full mx-auto p-md flex flex-col gap-md">
-        {/* Missing API Key Alert (per alert.md: tinted callout) */}
-        {!hasTatumKey && (
-          <div className="flex gap-lg rounded-xl bg-utility-warning-50 p-xl">
-            <Info className="mt-xxs size-5 shrink-0 text-utility-warning-600" aria-hidden="true" />
-            <div>
-              <p className="text-sm font-semibold text-utility-warning-600">Tatum API Key Missing</p>
-              <p className="mt-xxs text-sm text-tertiary">
-                Running in Demo Mode with mock on-chain transactions and Walrus Memory habits.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Global Error Alert (per alert.md: tinted callout) */}
+        {/* API Failure with Retry button (Requirement 6) */}
         {apiError && (
-          <div className="flex gap-lg rounded-xl bg-utility-error-50 p-xl">
-            <AlertTriangle className="mt-xxs size-5 shrink-0 text-utility-error-600" aria-hidden="true" />
-            <div>
-              <p className="text-sm font-semibold text-utility-error-600">Request Error</p>
-              <p className="mt-xxs text-sm text-tertiary">{apiError}</p>
+          <div className="flex flex-col gap-sm rounded-xl bg-utility-error-50 p-xl border border-error-subtle">
+            <div className="flex gap-lg items-start">
+              <AlertTriangle className="mt-xxs size-5 shrink-0 text-utility-error-600" aria-hidden="true" />
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-utility-error-600">API Connection Failed</p>
+                <p className="mt-xxs text-sm text-tertiary">{apiError}</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-sm mt-xs">
+              <button
+                type="button"
+                onClick={handleRetry}
+                className="inline-flex items-center gap-sm rounded-lg border border-transparent bg-brand-solid px-lg py-sm text-sm font-semibold text-primary-on-brand shadow-xs hover:bg-brand-solid-hover focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                <RefreshCw className="size-4 shrink-0 text-fg-white" />
+                Retry
+              </button>
             </div>
           </div>
         )}
 
-        {/* Monitored Wallet Form (per input.md & button.md) */}
+        {/* Monitored Wallet Form */}
         <form onSubmit={handleSearchSubmit} className="flex flex-col gap-sm">
           <label htmlFor="addressInput" className="text-sm font-medium text-secondary flex items-center justify-between">
             <span>Watchdog Monitored Address</span>
             <span className="text-xs text-tertiary">
-              {demoMode ? 'Demo Sandbox' : 'Ethereum L1'}
+              {demoMode ? 'Sample Sandbox' : 'Ethereum L1'}
             </span>
           </label>
           <div className="flex gap-xs">
-            <div className="relative flex-1">
-              <div className="absolute inset-y-0 left-0 pl-md flex items-center pointer-events-none">
-                <Search className="size-4 text-fg-quaternary shrink-0" />
+              <div className="relative flex-1">
+                <div className="absolute inset-y-0 left-0 pl-md flex items-center pointer-events-none">
+                  <Search className="size-4 text-fg-quaternary shrink-0" />
+                </div>
+                <input
+                  id="addressInput"
+                  type="text"
+                  value={addressInput}
+                  onChange={(e) => setAddressInput(e.target.value)}
+                  placeholder="0x... wallet address"
+                  className="w-full rounded-md bg-primary pl-3xl pr-lg py-sm text-sm font-mono text-primary placeholder:text-placeholder border border-primary focus-visible:ring-2 focus-visible:ring-focus-ring focus:outline-none"
+                />
               </div>
-              <input
-                id="addressInput"
-                type="text"
-                value={addressInput}
-                onChange={(e) => setAddressInput(e.target.value)}
-                placeholder="0x... wallet address"
-                className="w-full rounded-md bg-primary pl-10 pr-sm py-sm text-sm font-mono text-primary placeholder:text-placeholder border border-primary focus-visible:ring-2 focus-visible:ring-focus-ring focus:outline-none"
-              />
-            </div>
-            {/* Primary Action Button (per button.md) */}
             <button
               type="submit"
               disabled={loading}
@@ -509,17 +533,35 @@ export function App() {
         </form>
 
         {/* =========================================================================
-            SCREEN 1: WALLET (Balance, Monthly Summary Card, Transactions)
+            SCREEN 1: WALLET (Balance, Monthly Summary Card, Real Transactions)
         ========================================================================= */}
         {activeTab === 'wallet' && (
           <div className="flex flex-col gap-md">
-            {/* Balance Overview Card (per card.md) */}
+            {/* Balance Overview Card */}
             <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs">
               <div className="flex items-center justify-between text-xs text-tertiary mb-xs">
                 <span>Verified Balance</span>
-                <span className="font-mono text-xs text-secondary bg-secondary px-xs py-xxs rounded-md border border-secondary">
-                  {activeAddress.slice(0, 6)}...{activeAddress.slice(-4)}
-                </span>
+                {/* Etherscan Address Chip (Requirement 5) */}
+                <div className="flex items-center gap-xs">
+                  <a
+                    href={`https://etherscan.io/address/${activeAddress}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-xs text-secondary bg-secondary px-xs py-xxs rounded-md border border-secondary hover:text-brand-primary flex items-center gap-xxs"
+                    title="View address on Etherscan"
+                  >
+                    <span>{activeAddress.slice(0, 6)}...{activeAddress.slice(-4)}</span>
+                    <ExternalLink className="size-3 text-fg-quaternary" />
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(activeAddress, 'address')}
+                    className="p-xxs text-tertiary hover:text-primary rounded"
+                    title="Copy address"
+                  >
+                    <Copy className="size-3" />
+                  </button>
+                </div>
               </div>
               <div className="flex items-baseline gap-xs">
                 <span className="text-heading-lg font-bold text-primary tracking-tight">
@@ -530,13 +572,13 @@ export function App() {
               <div className="mt-md pt-xs border-t border-secondary flex items-center justify-between text-xs text-tertiary">
                 <span className="flex items-center gap-xs">
                   <Sparkles className="size-4 text-fg-brand-primary shrink-0" />
-                  {demoMode ? 'Simulated On-Chain State' : 'Live Tatum Data API'}
+                  {demoMode ? 'Sample data' : 'Live data from Tatum'}
                 </span>
                 <span>Ethereum</span>
               </div>
             </section>
 
-            {/* MONTHLY SUMMARY CARD (per card.md & progress-bar.md) */}
+            {/* MONTHLY SUMMARY CARD (Requirement 4: Rolling 30 Days, Exact Sums) */}
             {monthlySummary && (
               <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs flex flex-col gap-sm">
                 <div className="flex items-center justify-between">
@@ -544,7 +586,7 @@ export function App() {
                     <PieChart className="size-4 text-fg-brand-primary shrink-0" />
                     <h2 className="text-sm font-semibold text-primary">Monthly Expense Summary</h2>
                   </div>
-                  <span className="text-xs text-tertiary">30d Rolling</span>
+                  <span className="text-xs text-tertiary">Rolling 30 Days</span>
                 </div>
 
                 {/* Top Metrics Row */}
@@ -552,34 +594,37 @@ export function App() {
                   <div className="bg-secondary p-sm rounded-lg border border-secondary">
                     <div className="text-xs text-tertiary">Total Outgoing</div>
                     <div className="text-sm font-bold text-primary mt-xxs">
-                      {monthlySummary.currentMonthTotalEth} ETH
+                      {monthlySummary.currentMonthTotalEth}
                     </div>
                     <div className="flex items-center gap-xxs text-xs mt-xxs">
-                      {monthlySummary.diffPercent > 0 ? (
-                        <span className="text-warning-primary flex items-center">
-                          <TrendingUp className="w-3 h-3 mr-xxs inline" />+{monthlySummary.diffPercent}%
+                      {monthlySummary.diffPercentDisplay !== 'n/a' ? (
+                        <span className="text-secondary flex items-center font-semibold">
+                          {monthlySummary.diffPercentDisplay.startsWith('+') ? (
+                            <TrendingUp className="w-3 h-3 mr-xxs inline text-warning-primary" />
+                          ) : (
+                            <TrendingDown className="w-3 h-3 mr-xxs inline text-success-primary" />
+                          )}
+                          {monthlySummary.diffPercentDisplay}
                         </span>
                       ) : (
-                        <span className="text-success-primary flex items-center">
-                          <TrendingDown className="w-3 h-3 mr-xxs inline" />{monthlySummary.diffPercent}%
-                        </span>
+                        <span className="text-tertiary font-medium">n/a</span>
                       )}
-                      <span className="text-tertiary text-xs">vs last mo</span>
+                      <span className="text-tertiary text-xs">vs prev 30d</span>
                     </div>
                   </div>
 
                   <div className="bg-secondary p-sm rounded-lg border border-secondary">
                     <div className="text-xs text-tertiary">Total Fees Paid</div>
                     <div className="text-sm font-bold text-primary mt-xxs">
-                      {monthlySummary.totalFeesEth} ETH
+                      {monthlySummary.totalFeesEth}
                     </div>
                     <div className="text-xs text-tertiary mt-xxs">
-                      Cap: {monthlySummary.monthlyBudgetEth} ETH
+                      Receipt Verified
                     </div>
                   </div>
                 </div>
 
-                {/* Category Breakdown Progress Bars (per progress-bar.md: track bg-tertiary, fill bg-brand-solid) */}
+                {/* Category Breakdown */}
                 <div className="flex flex-col gap-xs pt-xs border-t border-secondary">
                   <span className="text-xs font-semibold text-secondary">Spending by Category</span>
                   <div className="flex flex-col gap-xs">
@@ -587,13 +632,12 @@ export function App() {
                       <div key={cat.name} className="flex flex-col gap-xxs">
                         <div className="flex justify-between text-xs">
                           <span className="text-secondary">{cat.name}</span>
-                          <span className="font-semibold text-primary">{cat.amountEth} ETH ({cat.percentage}%)</span>
+                          <span className="font-semibold text-primary">{cat.amountEth} ({cat.percentage}%)</span>
                         </div>
-                        {/* Progress Bar recipe */}
                         <div className="h-2 w-full overflow-hidden rounded-full bg-tertiary">
                           <div 
                             className="h-full rounded-full bg-brand-solid transition-all"
-                            style={{ width: `${Math.min(100, Math.max(5, cat.percentage))}%` }}
+                            style={{ width: `${Math.min(100, Math.max(0, cat.percentage))}%` }}
                           />
                         </div>
                       </div>
@@ -614,62 +658,92 @@ export function App() {
               </section>
             )}
 
-            {/* Transactions Section (per card.md & table.md structure) */}
+            {/* Transactions Section (Requirements 1, 2, 3, 5) */}
             <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs flex flex-col gap-sm">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-primary flex items-center gap-xs">
                   <History className="size-4 text-fg-tertiary shrink-0" />
                   Recent Transactions
                 </h2>
-                <span className="text-xs text-tertiary">{transactions.length} items</span>
+                <span className="text-xs text-tertiary">{transactions.length} verified</span>
               </div>
 
               {loading ? (
                 <div className="py-xl flex flex-col items-center justify-center gap-xs text-tertiary">
                   <RefreshCw className="size-6 animate-spin text-fg-brand-primary" />
-                  <span className="text-xs">Querying transactions...</span>
+                  <span className="text-xs">Querying Tatum Data API...</span>
                 </div>
               ) : transactions.length === 0 ? (
                 <div className="py-lg text-center text-xs text-tertiary">
-                  No transactions found for this wallet.
+                  No transactions found for this address.
                 </div>
               ) : (
                 <div className="divide-y divide-secondary">
                   {transactions.map((tx) => (
-                    <div key={tx.hash} className="py-sm first:pt-none last:pb-none flex items-center justify-between gap-sm">
-                      <div className="flex items-center gap-sm min-w-0">
-                        <div
-                          className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 border ${
-                            tx.type === 'outgoing'
-                              ? 'bg-utility-gray-50 border-utility-gray-200 text-utility-gray-700'
-                              : 'bg-utility-success-50 border-utility-success-200 text-utility-success-700'
-                          }`}
-                        >
-                          {tx.type === 'outgoing' ? (
-                            <ArrowUpRight className="size-4 text-fg-secondary shrink-0" />
-                          ) : (
-                            <ArrowDownLeft className="size-4 text-fg-success-primary shrink-0" />
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-xs font-medium text-primary truncate">
-                            {tx.type === 'outgoing'
-                              ? `To: ${tx.to.slice(0, 6)}...${tx.to.slice(-4)}`
-                              : `From: ${tx.from.slice(0, 6)}...${tx.from.slice(-4)}`}
+                    <div key={tx.hash} className="py-sm first:pt-none last:pb-none flex flex-col gap-xs">
+                      <div className="flex items-center justify-between gap-sm">
+                        <div className="flex items-center gap-sm min-w-0">
+                          <div
+                            className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 border ${
+                              tx.type === 'outgoing'
+                                ? 'bg-utility-gray-50 border-utility-gray-200 text-utility-gray-700'
+                                : 'bg-utility-success-50 border-utility-success-200 text-utility-success-700'
+                            }`}
+                          >
+                            {tx.type === 'outgoing' ? (
+                              <ArrowUpRight className="size-4 text-fg-secondary shrink-0" />
+                            ) : (
+                              <ArrowDownLeft className="size-4 text-fg-success-primary shrink-0" />
+                            )}
                           </div>
-                          <div className="text-xs text-tertiary font-mono">
-                            {tx.category || 'Transfer'} • Fee: {tx.feeEth || '0.002'} ETH
+                          <div className="min-w-0">
+                            {/* Category Badge & Real From/To */}
+                            <div className="flex items-center gap-xs flex-wrap">
+                              <span className="inline-flex items-center rounded-full border border-utility-gray-200 bg-utility-gray-50 px-xs py-none text-xs font-medium text-utility-gray-700">
+                                {tx.category}
+                              </span>
+                              <span className="text-xs font-medium text-primary truncate max-w-[170px]">
+                                {tx.type === 'outgoing' ? `To: ${tx.to}` : `From: ${tx.from}`}
+                              </span>
+                            </div>
+
+                            <div className="text-xs text-tertiary mt-xxs flex items-center gap-xs">
+                              <span>Fee: {tx.feeEth !== 'n/a' ? `${tx.feeEth} ETH` : 'n/a'}</span>
+                              <span>•</span>
+                              <span>{formatTimeAgo(tx.timestamp)}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Real Value Display */}
+                        <div className="text-right shrink-0">
+                          <div className={`text-xs font-semibold ${tx.type === 'outgoing' ? 'text-primary' : 'text-success-primary'}`}>
+                            {tx.type === 'outgoing' ? '-' : '+'}{tx.valueDisplay}
                           </div>
                         </div>
                       </div>
 
-                      <div className="text-right shrink-0">
-                        <div className={`text-xs font-semibold ${tx.type === 'outgoing' ? 'text-primary' : 'text-success-primary'}`}>
-                          {tx.type === 'outgoing' ? '-' : '+'}{tx.value} {tx.tokenSymbol}
-                        </div>
-                        <div className="text-xs text-tertiary">
-                          {formatTimeAgo(tx.timestamp)}
-                        </div>
+                      {/* Etherscan TX Hash Link & Copy Hash Fallback (Requirement 5) */}
+                      <div className="flex items-center justify-between text-xs text-tertiary bg-secondary px-xs py-xxs rounded-md border border-secondary">
+                        <a
+                          href={`https://etherscan.io/tx/${tx.hash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-mono text-xs text-secondary hover:text-brand-primary flex items-center gap-xxs truncate max-w-[280px]"
+                          title="Open transaction on Etherscan"
+                        >
+                          <span className="truncate">{tx.hash}</span>
+                          <ExternalLink className="size-3 text-fg-quaternary shrink-0" />
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(tx.hash, 'tx hash')}
+                          className="inline-flex items-center gap-xxs text-xs text-tertiary hover:text-primary shrink-0 ml-xs"
+                          title="Copy hash"
+                        >
+                          <Copy className="size-3" />
+                          <span>Copy</span>
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -684,7 +758,7 @@ export function App() {
         ========================================================================= */}
         {activeTab === 'alerts' && (
           <div className="flex flex-col gap-md">
-            {/* Watchdog Status Card (per card.md) */}
+            {/* Watchdog Status Card */}
             <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs">
               <div className="flex items-center gap-sm">
                 <div className="w-9 h-9 rounded-lg bg-utility-brand-50 border border-utility-brand-200 flex items-center justify-center text-brand-primary shrink-0">
@@ -745,10 +819,9 @@ export function App() {
                         : 'border-secondary'
                     }`}
                   >
-                    {/* Severity Badge & Rule (per badge.md) */}
+                    {/* Severity Badge & Rule */}
                     <div className="flex items-start justify-between gap-sm">
                       <div className="flex items-center gap-xs flex-wrap">
-                        {/* Severity Indicator Badge */}
                         <span
                           className={`inline-flex items-center gap-xs rounded-full border px-md py-xxs text-xs font-medium ${
                             alert.severity === 'high'
@@ -787,12 +860,12 @@ export function App() {
                           Target: {alert.counterparty}
                         </span>
                         <span className="text-xs font-semibold text-primary">
-                          Amount: {alert.amount} {alert.token}
+                          Amount: {alert.amount}
                         </span>
                       </div>
 
                       <div className="flex items-center gap-xs shrink-0">
-                        {/* Trust this address button (per button.md secondary) */}
+                        {/* Trust this address button */}
                         <button
                           type="button"
                           onClick={() => handleTrustAddress(alert.counterparty, `Peer ${alert.counterparty.slice(0, 6)}`)}
@@ -802,7 +875,7 @@ export function App() {
                           Trust address
                         </button>
 
-                        {/* Ignore alert button (per button.md tertiary) */}
+                        {/* Ignore alert button */}
                         <button
                           type="button"
                           onClick={() => handleDismissAlert(alert.id)}
@@ -825,7 +898,7 @@ export function App() {
         ========================================================================= */}
         {activeTab === 'chat' && (
           <div className="flex flex-col gap-md">
-            {/* Chat Header Card (per card.md) */}
+            {/* Chat Header Card */}
             <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs flex items-center justify-between">
               <div className="flex items-center gap-sm">
                 <div className="w-8 h-8 rounded-lg bg-brand-solid flex items-center justify-center text-primary-on-brand shadow-xs">
@@ -841,7 +914,7 @@ export function App() {
               </span>
             </section>
 
-            {/* Quick Prompt Suggestion Chips (per badge.md / button.md) */}
+            {/* Quick Prompt Suggestion Chips */}
             <div className="flex flex-col gap-xs">
               <span className="text-xs font-semibold text-secondary px-xs">Suggested Inquiries</span>
               <div className="flex gap-xs overflow-x-auto pb-xxs">
@@ -888,7 +961,6 @@ export function App() {
                     {msg.text}
                   </div>
 
-                  {/* Explicit Walrus Memory Citations */}
                   {msg.recalledMemories && msg.recalledMemories.length > 0 && (
                     <div className="bg-primary border border-secondary rounded-lg p-xs text-xs max-w-[85%] flex flex-col gap-xxs shadow-xs">
                       <div className="flex items-center gap-xxs font-semibold text-brand-primary text-xs">
@@ -917,7 +989,7 @@ export function App() {
               )}
             </section>
 
-            {/* Chat Input Field (per input.md & button.md) */}
+            {/* Chat Input Field */}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -948,7 +1020,7 @@ export function App() {
         ========================================================================= */}
         {activeTab === 'memory' && (
           <div className="flex flex-col gap-md">
-            {/* What Walrus Currently Remembers Card (per card.md) */}
+            {/* What Walrus Currently Remembers Card */}
             <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs flex flex-col gap-sm">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-sm">
@@ -984,7 +1056,7 @@ export function App() {
               </div>
             </section>
 
-            {/* Favorite Counterparties (per card.md) */}
+            {/* Favorite Counterparties */}
             <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs flex flex-col gap-sm">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-semibold text-secondary uppercase tracking-wider">
@@ -1009,7 +1081,7 @@ export function App() {
               </div>
             </section>
 
-            {/* Trusted Addresses Manager (Add / Remove) (per card.md, input.md, select.md) */}
+            {/* Trusted Addresses Manager (Add / Remove) */}
             <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs flex flex-col gap-sm">
               <div className="flex items-center justify-between">
                 <div>
@@ -1040,7 +1112,7 @@ export function App() {
                   onChange={(e) => setNewTrustAddress(e.target.value)}
                   className="rounded-md bg-primary px-lg py-sm text-sm text-primary placeholder:text-placeholder border border-primary focus-visible:ring-2 focus-visible:ring-focus-ring focus:outline-none"
                 />
-                <div className="flex gap-xs">
+                <div className="flex gap-sm">
                   <input
                     type="text"
                     placeholder="Label name (e.g. Treasury Safe)"
@@ -1048,7 +1120,6 @@ export function App() {
                     onChange={(e) => setNewTrustName(e.target.value)}
                     className="flex-1 rounded-md bg-primary px-lg py-sm text-sm text-primary placeholder:text-placeholder border border-primary focus-visible:ring-2 focus-visible:ring-focus-ring focus:outline-none"
                   />
-                  {/* Select Control per select.md */}
                   <select
                     value={newTrustCategory}
                     onChange={(e) => setNewTrustCategory(e.target.value)}
@@ -1061,7 +1132,6 @@ export function App() {
                     <option value="Custom">Custom</option>
                   </select>
                 </div>
-                {/* Primary Action Button (per button.md) */}
                 <button
                   type="submit"
                   disabled={!newTrustAddress.trim()}
@@ -1104,12 +1174,9 @@ export function App() {
         )}
       </main>
 
-      {/* =========================================================================
-          POLISH 6: BOTTOM NAVIGATION (Wallet, Alerts, Chat, Memory)
-      ========================================================================= */}
+      {/* Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 bg-primary border-t border-secondary py-xs shadow-lg">
         <div className="max-w-md mx-auto grid grid-cols-4 px-sm">
-          {/* 1. Wallet Tab */}
           <button
             type="button"
             onClick={() => setActiveTab('wallet')}
@@ -1123,7 +1190,6 @@ export function App() {
             <span className="text-xs mt-xxs">Wallet</span>
           </button>
 
-          {/* 2. Alerts Tab */}
           <button
             type="button"
             onClick={() => setActiveTab('alerts')}
@@ -1144,7 +1210,6 @@ export function App() {
             <span className="text-xs mt-xxs">Alerts</span>
           </button>
 
-          {/* 3. Chat Tab */}
           <button
             type="button"
             onClick={() => setActiveTab('chat')}
@@ -1158,7 +1223,6 @@ export function App() {
             <span className="text-xs mt-xxs">Chat</span>
           </button>
 
-          {/* 4. Memory Tab */}
           <button
             type="button"
             onClick={() => setActiveTab('memory')}
@@ -1174,15 +1238,13 @@ export function App() {
         </div>
       </nav>
 
-      {/* Config Details Modal (per dialog.md: bg-overlay opacity-70 + rounded-lg bg-primary shadow-2xl + header/body/footer) */}
+      {/* Config Details Modal */}
       {showConfigModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-md">
-          {/* Backdrop per dialog.md */}
           <div 
             className="fixed inset-0 bg-overlay opacity-70"
             onClick={() => setShowConfigModal(false)}
           />
-          {/* Panel per dialog.md */}
           <div className="relative z-10 flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-lg bg-primary shadow-2xl">
             <header className="flex items-start justify-between gap-lg border-b border-secondary p-xl">
               <div className="flex items-center gap-xs font-semibold text-primary text-lg">
