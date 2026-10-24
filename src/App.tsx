@@ -8,17 +8,26 @@ import {
   ArrowDownLeft, 
   AlertTriangle, 
   CheckCircle2, 
-  Cpu, 
   Database, 
   Sparkles, 
-  RefreshCw,
-  Sliders,
-  History,
-  Key,
-  Info,
-  Clock,
-  ShieldCheck,
-  Zap
+  RefreshCw, 
+  Sliders, 
+  History, 
+  Info, 
+  ShieldCheck, 
+  MessageSquare, 
+  BrainCircuit, 
+  Send, 
+  Plus, 
+  Trash2, 
+  EyeOff, 
+  PieChart, 
+  TrendingUp, 
+  TrendingDown, 
+  UserCheck, 
+  ToggleLeft,
+  ToggleRight,
+  X
 } from 'lucide-react';
 
 interface Transaction {
@@ -30,6 +39,8 @@ interface Transaction {
   timestamp: number;
   type: 'incoming' | 'outgoing';
   tokenSymbol: string;
+  category: string;
+  feeEth: string;
   transactionType: string;
 }
 
@@ -43,75 +54,172 @@ interface AlertItem {
   token: string;
   counterparty: string;
   timestamp: number;
+  isTrusted?: boolean;
 }
 
-interface MemoryProfile {
+interface TrustedAddress {
+  address: string;
+  name: string;
+  category: string;
+  addedAt: number;
+}
+
+interface FavoriteCounterparty {
+  address: string;
+  label: string;
+  frequency: number;
+  totalVolume: string;
+}
+
+interface MemoryProfileData {
+  walletAddress: string;
   minUsualTransferEth: number;
   maxUsualTransferEth: number;
-  trustedCount: number;
-  storageStatus: string;
+  monthlyFeeBudgetEth: number;
+  averageFeeGwei: number;
+}
+
+interface MonthlySummary {
+  currentMonthTotalEth: string;
+  lastMonthTotalEth: string;
+  diffPercent: number;
+  totalFeesEth: string;
+  feeStatus: string;
+  monthlyBudgetEth: number;
+  changeNote: string;
+  categories: Array<{
+    name: string;
+    amountEth: string;
+    percentage: number;
+  }>;
+}
+
+interface ChatMessage {
+  id: string;
+  sender: 'user' | 'assistant';
+  text: string;
+  recalledMemories?: string[];
+  timestamp: number;
 }
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<'wallet' | 'alerts'>('wallet');
+  const [activeTab, setActiveTab] = useState<'wallet' | 'alerts' | 'chat' | 'memory'>('wallet');
   const [addressInput, setAddressInput] = useState('0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045');
   const [activeAddress, setActiveAddress] = useState('0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045');
   
-  const [balance, setBalance] = useState<string>('0.0000');
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [alerts, setAlerts] = useState<AlertItem[]>([]);
-  const [memoryProfile, setMemoryProfile] = useState<MemoryProfile>({
-    minUsualTransferEth: 0.02,
-    maxUsualTransferEth: 0.50,
-    trustedCount: 5,
-    storageStatus: 'Walrus Memory Active'
-  });
+  // Demo Mode toggle
+  const [demoMode, setDemoMode] = useState<boolean>(false);
+  const [hasTatumKey, setHasTatumKey] = useState<boolean>(true);
 
+  // Wallet Data
+  const [balance, setBalance] = useState<string>('4.8250');
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [monthlySummary, setMonthlySummary] = useState<MonthlySummary | null>(null);
+
+  // Alerts Data
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+
+  // Memory Data
+  const [memoryProfile, setMemoryProfile] = useState<MemoryProfileData>({
+    walletAddress: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
+    minUsualTransferEth: 0.05,
+    maxUsualTransferEth: 0.65,
+    monthlyFeeBudgetEth: 0.045,
+    averageFeeGwei: 24
+  });
+  const [trustedAddresses, setTrustedAddresses] = useState<TrustedAddress[]>([]);
+  const [favoriteCounterparties, setFavoriteCounterparties] = useState<FavoriteCounterparty[]>([]);
+  const [newTrustAddress, setNewTrustAddress] = useState('');
+  const [newTrustName, setNewTrustName] = useState('');
+  const [newTrustCategory, setNewTrustCategory] = useState('Custom');
+
+  // Chat Data
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      id: 'welcome-msg',
+      sender: 'assistant',
+      text: "Hello! I am Ledger Memory Watchdog. I keep an active Walrus decentralized memory of your usual transfers, trusted contacts, and gas habits. Ask me anything about your expenses!",
+      recalledMemories: [
+        'Walrus Memory profile loaded for active wallet.',
+        'Established habits: 0.05 – 0.65 ETH transfer range, 24 Gwei gas baseline.'
+      ],
+      timestamp: Date.now() - 1000 * 60 * 5
+    }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+
+  // UI state
   const [loading, setLoading] = useState<boolean>(false);
   const [apiError, setApiError] = useState<string | null>(null);
-  const [hasTatumKey, setHasTatumKey] = useState<boolean>(true);
   const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
+  const [successToast, setSuccessToast] = useState<string | null>(null);
 
-  // Initial load
+  const showToast = (msg: string) => {
+    setSuccessToast(msg);
+    setTimeout(() => setSuccessToast(null), 3500);
+  };
+
   useEffect(() => {
-    fetchWalletData(activeAddress);
+    fetchStatus();
+    loadAllData(activeAddress, demoMode);
   }, []);
 
-  const fetchWalletData = async (targetAddress: string) => {
+  const fetchStatus = async () => {
+    try {
+      const res = await fetch('/api/tatum/status');
+      if (res.ok) {
+        const data = await res.json();
+        setHasTatumKey(data.hasTatumKey);
+        if (data.defaultDemo || !data.hasTatumKey) {
+          setDemoMode(true);
+        }
+      }
+    } catch (_) {}
+  };
+
+  const loadAllData = async (targetAddress: string, isDemo: boolean) => {
     setLoading(true);
     setApiError(null);
 
     try {
-      // 1. Fetch live balance from backend Tatum Data API
-      const balanceRes = await fetch(`/api/tatum/wallet/balance?address=${encodeURIComponent(targetAddress)}&chain=ethereum-mainnet`);
-      if (balanceRes.status === 401) {
-        setHasTatumKey(false);
-        setApiError('Tatum API key missing or invalid. Set TATUM_API_KEY on the server.');
-        setLoading(false);
-        return;
-      }
-      
-      let balanceVal = '0.0000';
+      // 1. Balance
+      const balanceUrl = `/api/tatum/wallet/balance?address=${encodeURIComponent(targetAddress)}&chain=ethereum-mainnet${isDemo ? '&demo=true' : ''}`;
+      const balanceRes = await fetch(balanceUrl);
       if (balanceRes.ok) {
-        const balanceData = await balanceRes.json();
-        balanceVal = balanceData.balance ?? '0.0000';
-        setBalance(balanceVal);
+        const bData = await balanceRes.json();
+        setBalance(bData.balance || '0.0000');
       }
 
-      // 2. Fetch transaction history from backend Tatum Data API
-      const txRes = await fetch(`/api/tatum/wallet/transactions?address=${encodeURIComponent(targetAddress)}&chain=ethereum-mainnet`);
+      // 2. Transactions
+      const txUrl = `/api/tatum/wallet/transactions?address=${encodeURIComponent(targetAddress)}&chain=ethereum-mainnet${isDemo ? '&demo=true' : ''}`;
+      const txRes = await fetch(txUrl);
       let fetchedTxs: Transaction[] = [];
       if (txRes.ok) {
-        const txData = await txRes.json();
-        fetchedTxs = txData.transactions || [];
+        const tData = await txRes.json();
+        fetchedTxs = tData.transactions || [];
         setTransactions(fetchedTxs);
-      } else {
-        const errJson = await txRes.json().catch(() => ({}));
-        if (errJson.error) setApiError(errJson.error);
       }
 
-      // 3. Run Walrus Memory Watchdog analysis on fetched transactions
-      const watchdogRes = await fetch('/api/tatum/watchdog/analyze', {
+      // 3. Monthly Summary
+      const summaryUrl = `/api/tatum/wallet/summary?address=${encodeURIComponent(targetAddress)}${isDemo ? '&demo=true' : ''}`;
+      const summaryRes = await fetch(summaryUrl);
+      if (summaryRes.ok) {
+        const sData = await summaryRes.json();
+        setMonthlySummary(sData);
+      }
+
+      // 4. Memory profile
+      const memRes = await fetch('/api/tatum/memory');
+      if (memRes.ok) {
+        const mData = await memRes.json();
+        if (mData.profile) setMemoryProfile(mData.profile);
+        if (mData.trustedAddresses) setTrustedAddresses(mData.trustedAddresses);
+        if (mData.favoriteCounterparties) setFavoriteCounterparties(mData.favoriteCounterparties);
+      }
+
+      // 5. Watchdog analysis for alerts
+      const watchRes = await fetch('/api/tatum/watchdog/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -119,26 +227,150 @@ export function App() {
           transactions: fetchedTxs
         })
       });
-
-      if (watchdogRes.ok) {
-        const watchdogData = await watchdogRes.json();
-        setAlerts(watchdogData.alerts || []);
-        if (watchdogData.memoryProfile) {
-          setMemoryProfile(watchdogData.memoryProfile);
-        }
+      if (watchRes.ok) {
+        const wData = await watchRes.json();
+        setAlerts(wData.alerts || []);
       }
     } catch (err: any) {
-      setApiError(err.message || 'Failed to fetch blockchain data.');
+      setApiError(err.message || 'Error communicating with server.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleToggleDemo = () => {
+    const nextDemo = !demoMode;
+    setDemoMode(nextDemo);
+    loadAllData(activeAddress, nextDemo);
+    showToast(nextDemo ? 'Demo mode enabled with realistic watch records.' : 'Demo mode disabled: using live API.');
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!addressInput.trim()) return;
     setActiveAddress(addressInput.trim());
-    fetchWalletData(addressInput.trim());
+    loadAllData(addressInput.trim(), demoMode);
+  };
+
+  const handleTrustAddress = async (addressToTrust: string, name?: string, category?: string) => {
+    try {
+      const res = await fetch('/api/tatum/memory/trust', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          address: addressToTrust,
+          name: name || `Contact ${addressToTrust.slice(0, 6)}`,
+          category: category || 'Trusted'
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTrustedAddresses(data.trustedAddresses);
+        loadAllData(activeAddress, demoMode);
+        showToast(`Saved ${addressToTrust.slice(0, 8)}... to Walrus Memory!`);
+      }
+    } catch (err: any) {
+      setApiError(err.message);
+    }
+  };
+
+  const handleUntrustAddress = async (addressToUntrust: string) => {
+    try {
+      const res = await fetch('/api/tatum/memory/untrust', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: addressToUntrust })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTrustedAddresses(data.trustedAddresses);
+        showToast('Address untrusted and removed from memory.');
+      }
+    } catch (err: any) {
+      setApiError(err.message);
+    }
+  };
+
+  const handleDismissAlert = async (alertId: string) => {
+    try {
+      const res = await fetch('/api/tatum/memory/dismiss-alert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          alertId,
+          note: 'User dismissed and ignored alert'
+        })
+      });
+      if (res.ok) {
+        setAlerts(prev => prev.filter(a => a.id !== alertId));
+        showToast('Alert ignored and recorded in Walrus Memory.');
+      }
+    } catch (err: any) {
+      setApiError(err.message);
+    }
+  };
+
+  const handleSendChat = async (queryText?: string) => {
+    const textToSend = queryText || chatInput;
+    if (!textToSend.trim() || chatLoading) return;
+
+    const userMsg: ChatMessage = {
+      id: `usr-${Date.now()}`,
+      sender: 'user',
+      text: textToSend,
+      timestamp: Date.now()
+    };
+
+    setChatMessages(prev => [...prev, userMsg]);
+    if (!queryText) setChatInput('');
+    setChatLoading(true);
+
+    try {
+      const res = await fetch('/api/tatum/chat/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: textToSend,
+          address: activeAddress,
+          demoMode
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const assistantMsg: ChatMessage = {
+          id: `ast-${Date.now()}`,
+          sender: 'assistant',
+          text: data.answer,
+          recalledMemories: data.recalledMemories || [],
+          timestamp: Date.now()
+        };
+        setChatMessages(prev => [...prev, assistantMsg]);
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setChatMessages(prev => [
+          ...prev,
+          {
+            id: `err-${Date.now()}`,
+            sender: 'assistant',
+            text: errJson.error || 'Unable to process query right now.',
+            timestamp: Date.now()
+          }
+        ]);
+      }
+    } catch (err: any) {
+      setChatMessages(prev => [
+        ...prev,
+        {
+          id: `err-${Date.now()}`,
+          sender: 'assistant',
+          text: 'Connection error while consulting Walrus Memory.',
+          timestamp: Date.now()
+        }
+      ]);
+    } finally {
+      setChatLoading(false);
+    }
   };
 
   const formatTimeAgo = (timestamp: number) => {
@@ -153,9 +385,17 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-secondary text-primary flex flex-col font-sans">
-      {/* Top Mobile-First App Header */}
-      <header className="sticky top-0 z-30 bg-primary border-b border-secondary px-lg py-md shadow-xs">
+    <div className="min-h-screen bg-secondary text-primary flex flex-col font-sans pb-11xl">
+      {/* Toast Notification (per toast.md: rounded-lg border border-secondary bg-primary p-lg shadow-lg) */}
+      {successToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-start gap-sm rounded-lg border border-secondary bg-primary p-lg shadow-lg">
+          <CheckCircle2 className="mt-xxs size-4 shrink-0 text-fg-success-primary" aria-hidden="true" />
+          <p className="text-sm text-secondary">{successToast}</p>
+        </div>
+      )}
+
+      {/* Top Mobile Header */}
+      <header className="sticky top-0 z-30 bg-primary border-b border-secondary px-lg py-sm shadow-xs">
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center gap-sm">
             <div className="w-8 h-8 rounded-lg bg-brand-solid flex items-center justify-center text-primary-on-brand shadow-xs">
@@ -164,156 +404,117 @@ export function App() {
             <div>
               <div className="flex items-center gap-xs">
                 <span className="text-md font-semibold text-primary tracking-tight">Ledger Memory</span>
-                <span className="bg-utility-brand-50 border border-utility-brand-200 text-utility-brand-700 text-xs px-xs py-none rounded-full font-medium">
+                <span className="inline-flex items-center gap-xs rounded-full border border-utility-brand-200 bg-utility-brand-50 px-md py-xxs text-xs font-medium text-utility-brand-700">
                   Watchdog
                 </span>
               </div>
-              <p className="text-xs text-tertiary">Expense memory & anomaly watcher</p>
+              <p className="text-xs text-tertiary">Expense watchdog & memory guardian</p>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setShowConfigModal(true)}
-            className="inline-flex items-center gap-xs px-sm py-xs rounded-md text-xs font-medium bg-secondary hover:bg-secondary-hover border border-secondary text-secondary transition-colors"
-          >
-            <Sliders className="w-3.5 h-3.5 text-fg-quaternary shrink-0" />
-            Config
-          </button>
+          <div className="flex items-center gap-xs">
+            {/* Demo Mode Toggle Button (per button.md secondary) */}
+            <button
+              type="button"
+              onClick={handleToggleDemo}
+              className={`inline-flex items-center gap-xs rounded-full border px-md py-xxs text-xs font-semibold shadow-xs transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                demoMode
+                  ? 'border-utility-brand-200 bg-utility-brand-50 text-utility-brand-700'
+                  : 'bg-primary text-secondary border-primary hover:bg-primary-hover'
+              }`}
+            >
+              {demoMode ? (
+                <>
+                  <ToggleRight className="size-4 text-fg-brand-primary shrink-0" />
+                  <span>Demo</span>
+                </>
+              ) : (
+                <>
+                  <ToggleLeft className="size-4 text-fg-quaternary shrink-0" />
+                  <span>Live</span>
+                </>
+              )}
+            </button>
+
+            {/* Config modal button (per button.md secondary) */}
+            <button
+              type="button"
+              onClick={() => setShowConfigModal(true)}
+              className="inline-flex items-center rounded-lg bg-primary p-sm text-secondary border border-primary shadow-xs hover:bg-primary-hover focus-visible:ring-2 focus-visible:ring-focus-ring"
+              title="Config Placeholders"
+            >
+              <Sliders className="size-4 text-fg-quaternary shrink-0" />
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-md w-full mx-auto p-md pb-2xl flex flex-col gap-md">
-        {/* API / Key Alerts if missing */}
+      {/* Main Container */}
+      <main className="flex-1 max-w-md w-full mx-auto p-md flex flex-col gap-md">
+        {/* Missing API Key Alert (per alert.md: tinted callout) */}
         {!hasTatumKey && (
-          <div className="rounded-xl border border-error-subtle bg-utility-error-50 p-md flex items-start gap-sm">
-            <AlertTriangle className="w-5 h-5 text-fg-error-primary shrink-0 mt-xxs" />
-            <div className="flex-1">
-              <h3 className="text-sm font-semibold text-utility-error-700">Tatum API Key Required</h3>
-              <p className="text-xs text-secondary mt-xxs">
-                Please set the <code className="font-mono font-semibold">TATUM_API_KEY</code> environment variable in your server configuration to query live indexed balances.
+          <div className="flex gap-lg rounded-xl bg-utility-warning-50 p-xl">
+            <Info className="mt-xxs size-5 shrink-0 text-utility-warning-600" aria-hidden="true" />
+            <div>
+              <p className="text-sm font-semibold text-utility-warning-600">Tatum API Key Missing</p>
+              <p className="mt-xxs text-sm text-tertiary">
+                Running in Demo Mode with mock on-chain transactions and Walrus Memory habits.
               </p>
             </div>
           </div>
         )}
 
-        {apiError && hasTatumKey && (
-          <div className="rounded-xl border border-secondary bg-utility-warning-50 p-sm flex items-start gap-xs">
-            <Info className="w-4 h-4 text-fg-warning-primary shrink-0 mt-xxs" />
-            <div className="text-xs text-utility-warning-700 flex-1">
-              {apiError}
+        {/* Global Error Alert (per alert.md: tinted callout) */}
+        {apiError && (
+          <div className="flex gap-lg rounded-xl bg-utility-error-50 p-xl">
+            <AlertTriangle className="mt-xxs size-5 shrink-0 text-utility-error-600" aria-hidden="true" />
+            <div>
+              <p className="text-sm font-semibold text-utility-error-600">Request Error</p>
+              <p className="mt-xxs text-sm text-tertiary">{apiError}</p>
             </div>
           </div>
         )}
 
-        {/* Walrus Memory Profile Ribbon */}
-        <section className="bg-primary rounded-xl border border-secondary p-md shadow-xs flex flex-col gap-sm">
-          <div className="flex items-center justify-between text-xs">
-            <span className="flex items-center gap-xs font-semibold text-primary">
-              <Database className="w-4 h-4 text-fg-brand-primary shrink-0" />
-              Walrus Memory Profile
-            </span>
-            <span className="inline-flex items-center gap-xs bg-utility-brand-50 border border-utility-brand-200 text-utility-brand-700 px-xs py-xxs rounded-full text-xs font-medium">
-              <Sparkles className="w-3 h-3 shrink-0" />
-              Watchdog Active
-            </span>
-          </div>
-
-          <p className="text-xs text-tertiary">
-            Walrus decentralised blob memory stores habitual spending patterns and trusted addresses to catch deviations.
-          </p>
-
-          <div className="grid grid-cols-2 gap-sm text-xs pt-xs border-t border-secondary">
-            <div className="bg-secondary p-sm rounded-lg border border-secondary">
-              <div className="text-tertiary text-xs">Usual Transfer Range</div>
-              <div className="text-primary font-semibold text-sm mt-xxs">
-                {memoryProfile.minUsualTransferEth} – {memoryProfile.maxUsualTransferEth} ETH
-              </div>
-            </div>
-            <div className="bg-secondary p-sm rounded-lg border border-secondary">
-              <div className="text-tertiary text-xs">Remembered Peers</div>
-              <div className="text-primary font-semibold text-sm mt-xxs">
-                {memoryProfile.trustedCount} Addresses
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Monitored Wallet Form */}
-        <form onSubmit={handleSearchSubmit} className="flex flex-col gap-xs">
-          <label htmlFor="addressInput" className="text-xs font-semibold text-secondary flex items-center justify-between">
+        {/* Monitored Wallet Form (per input.md & button.md) */}
+        <form onSubmit={handleSearchSubmit} className="flex flex-col gap-sm">
+          <label htmlFor="addressInput" className="text-sm font-medium text-secondary flex items-center justify-between">
             <span>Watchdog Monitored Address</span>
-            <span className="text-tertiary text-xs">Ethereum Mainnet</span>
+            <span className="text-xs text-tertiary">
+              {demoMode ? 'Demo Sandbox' : 'Ethereum L1'}
+            </span>
           </label>
           <div className="flex gap-xs">
             <div className="relative flex-1">
               <div className="absolute inset-y-0 left-0 pl-md flex items-center pointer-events-none">
-                <Search className="w-4 h-4 text-fg-quaternary shrink-0" />
+                <Search className="size-4 text-fg-quaternary shrink-0" />
               </div>
               <input
                 id="addressInput"
                 type="text"
                 value={addressInput}
                 onChange={(e) => setAddressInput(e.target.value)}
-                placeholder="Enter 0x... wallet address"
-                className="w-full bg-primary border border-secondary rounded-lg pl-xl pr-sm py-sm text-xs font-mono text-primary placeholder:text-placeholder focus-visible:ring-2 focus-visible:ring-focus-ring focus:outline-none"
+                placeholder="0x... wallet address"
+                className="w-full rounded-md bg-primary pl-10 pr-sm py-sm text-sm font-mono text-primary placeholder:text-placeholder border border-primary focus-visible:ring-2 focus-visible:ring-focus-ring focus:outline-none"
               />
             </div>
+            {/* Primary Action Button (per button.md) */}
             <button
               type="submit"
               disabled={loading}
-              className="inline-flex items-center justify-center gap-xs rounded-lg border border-transparent bg-brand-solid px-md py-sm text-xs font-semibold text-primary-on-brand shadow-xs hover:bg-brand-solid-hover focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50 shrink-0"
+              className="inline-flex items-center justify-center gap-sm rounded-lg border border-transparent bg-brand-solid px-lg py-sm text-sm font-semibold text-primary-on-brand shadow-xs hover:bg-brand-solid-hover focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50 shrink-0"
             >
-              {loading ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0 text-fg-white" />
-              ) : (
-                'Watch'
-              )}
+              {loading ? <RefreshCw className="size-4 animate-spin text-fg-white shrink-0" /> : 'Watch'}
             </button>
           </div>
         </form>
 
-        {/* Mobile Tab Segmented Switcher */}
-        <div className="bg-primary p-xxs rounded-xl border border-secondary flex shadow-xs">
-          <button
-            type="button"
-            onClick={() => setActiveTab('wallet')}
-            className={`flex-1 py-sm rounded-lg text-xs font-semibold flex items-center justify-center gap-xs transition-colors ${
-              activeTab === 'wallet'
-                ? 'bg-secondary text-primary shadow-xs'
-                : 'text-tertiary hover:text-secondary'
-            }`}
-          >
-            <WalletIcon className="w-3.5 h-3.5 shrink-0" />
-            Wallet & History
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('alerts')}
-            className={`flex-1 py-sm rounded-lg text-xs font-semibold flex items-center justify-center gap-xs transition-colors relative ${
-              activeTab === 'alerts'
-                ? 'bg-secondary text-primary shadow-xs'
-                : 'text-tertiary hover:text-secondary'
-            }`}
-          >
-            <Bell className="w-3.5 h-3.5 shrink-0" />
-            Watchdog Alerts
-            {alerts.length > 0 && (
-              <span className="bg-error-primary text-primary-on-brand text-xs px-xs py-none rounded-full font-bold ml-xxs">
-                {alerts.length}
-              </span>
-            )}
-          </button>
-        </div>
-
         {/* =========================================================================
-            TAB 1: WALLET SCREEN
+            SCREEN 1: WALLET (Balance, Monthly Summary Card, Transactions)
         ========================================================================= */}
         {activeTab === 'wallet' && (
           <div className="flex flex-col gap-md">
-            {/* Balance Overview Card */}
-            <div className="bg-primary border border-secondary rounded-xl p-md shadow-xs">
+            {/* Balance Overview Card (per card.md) */}
+            <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs">
               <div className="flex items-center justify-between text-xs text-tertiary mb-xs">
                 <span>Verified Balance</span>
                 <span className="font-mono text-xs text-secondary bg-secondary px-xs py-xxs rounded-md border border-secondary">
@@ -326,35 +527,111 @@ export function App() {
                 </span>
                 <span className="text-md font-semibold text-brand-primary">ETH</span>
               </div>
-              <div className="mt-sm pt-xs border-t border-secondary flex items-center justify-between text-xs text-tertiary">
+              <div className="mt-md pt-xs border-t border-secondary flex items-center justify-between text-xs text-tertiary">
                 <span className="flex items-center gap-xs">
-                  <Sparkles className="w-3.5 h-3.5 text-fg-brand-primary shrink-0" />
-                  Live Tatum Data API
+                  <Sparkles className="size-4 text-fg-brand-primary shrink-0" />
+                  {demoMode ? 'Simulated On-Chain State' : 'Live Tatum Data API'}
                 </span>
-                <span>Ethereum L1</span>
+                <span>Ethereum</span>
               </div>
-            </div>
+            </section>
 
-            {/* Transaction List Card */}
-            <div className="bg-primary border border-secondary rounded-xl p-md shadow-xs flex flex-col gap-sm">
+            {/* MONTHLY SUMMARY CARD (per card.md & progress-bar.md) */}
+            {monthlySummary && (
+              <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs flex flex-col gap-sm">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-xs">
+                    <PieChart className="size-4 text-fg-brand-primary shrink-0" />
+                    <h2 className="text-sm font-semibold text-primary">Monthly Expense Summary</h2>
+                  </div>
+                  <span className="text-xs text-tertiary">30d Rolling</span>
+                </div>
+
+                {/* Top Metrics Row */}
+                <div className="grid grid-cols-2 gap-sm">
+                  <div className="bg-secondary p-sm rounded-lg border border-secondary">
+                    <div className="text-xs text-tertiary">Total Outgoing</div>
+                    <div className="text-sm font-bold text-primary mt-xxs">
+                      {monthlySummary.currentMonthTotalEth} ETH
+                    </div>
+                    <div className="flex items-center gap-xxs text-xs mt-xxs">
+                      {monthlySummary.diffPercent > 0 ? (
+                        <span className="text-warning-primary flex items-center">
+                          <TrendingUp className="w-3 h-3 mr-xxs inline" />+{monthlySummary.diffPercent}%
+                        </span>
+                      ) : (
+                        <span className="text-success-primary flex items-center">
+                          <TrendingDown className="w-3 h-3 mr-xxs inline" />{monthlySummary.diffPercent}%
+                        </span>
+                      )}
+                      <span className="text-tertiary text-xs">vs last mo</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-secondary p-sm rounded-lg border border-secondary">
+                    <div className="text-xs text-tertiary">Total Fees Paid</div>
+                    <div className="text-sm font-bold text-primary mt-xxs">
+                      {monthlySummary.totalFeesEth} ETH
+                    </div>
+                    <div className="text-xs text-tertiary mt-xxs">
+                      Cap: {monthlySummary.monthlyBudgetEth} ETH
+                    </div>
+                  </div>
+                </div>
+
+                {/* Category Breakdown Progress Bars (per progress-bar.md: track bg-tertiary, fill bg-brand-solid) */}
+                <div className="flex flex-col gap-xs pt-xs border-t border-secondary">
+                  <span className="text-xs font-semibold text-secondary">Spending by Category</span>
+                  <div className="flex flex-col gap-xs">
+                    {monthlySummary.categories.map((cat) => (
+                      <div key={cat.name} className="flex flex-col gap-xxs">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-secondary">{cat.name}</span>
+                          <span className="font-semibold text-primary">{cat.amountEth} ETH ({cat.percentage}%)</span>
+                        </div>
+                        {/* Progress Bar recipe */}
+                        <div className="h-2 w-full overflow-hidden rounded-full bg-tertiary">
+                          <div 
+                            className="h-full rounded-full bg-brand-solid transition-all"
+                            style={{ width: `${Math.min(100, Math.max(5, cat.percentage))}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* What Changed Note */}
+                <div className="bg-secondary p-sm rounded-lg border border-secondary mt-xxs">
+                  <div className="flex items-center gap-xs text-xs font-semibold text-secondary mb-xxs">
+                    <Sparkles className="size-3 text-fg-brand-primary shrink-0" />
+                    What changed since last month
+                  </div>
+                  <p className="text-xs text-tertiary leading-relaxed">
+                    {monthlySummary.changeNote}
+                  </p>
+                </div>
+              </section>
+            )}
+
+            {/* Transactions Section (per card.md & table.md structure) */}
+            <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs flex flex-col gap-sm">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-primary flex items-center gap-xs">
-                  <History className="w-4 h-4 text-fg-tertiary shrink-0" />
-                  Transactions
+                  <History className="size-4 text-fg-tertiary shrink-0" />
+                  Recent Transactions
                 </h2>
-                <span className="text-xs text-tertiary">
-                  {transactions.length} fetched
-                </span>
+                <span className="text-xs text-tertiary">{transactions.length} items</span>
               </div>
 
               {loading ? (
                 <div className="py-xl flex flex-col items-center justify-center gap-xs text-tertiary">
-                  <RefreshCw className="w-6 h-6 animate-spin text-fg-brand-primary" />
-                  <span className="text-xs">Querying Tatum indexer...</span>
+                  <RefreshCw className="size-6 animate-spin text-fg-brand-primary" />
+                  <span className="text-xs">Querying transactions...</span>
                 </div>
               ) : transactions.length === 0 ? (
                 <div className="py-lg text-center text-xs text-tertiary">
-                  No recent transactions discovered for this address.
+                  No transactions found for this wallet.
                 </div>
               ) : (
                 <div className="divide-y divide-secondary">
@@ -369,9 +646,9 @@ export function App() {
                           }`}
                         >
                           {tx.type === 'outgoing' ? (
-                            <ArrowUpRight className="w-4 h-4 text-fg-secondary shrink-0" />
+                            <ArrowUpRight className="size-4 text-fg-secondary shrink-0" />
                           ) : (
-                            <ArrowDownLeft className="w-4 h-4 text-fg-success-primary shrink-0" />
+                            <ArrowDownLeft className="size-4 text-fg-success-primary shrink-0" />
                           )}
                         </div>
                         <div className="min-w-0">
@@ -381,7 +658,7 @@ export function App() {
                               : `From: ${tx.from.slice(0, 6)}...${tx.from.slice(-4)}`}
                           </div>
                           <div className="text-xs text-tertiary font-mono">
-                            {tx.hash.slice(0, 10)}...
+                            {tx.category || 'Transfer'} • Fee: {tx.feeEth || '0.002'} ETH
                           </div>
                         </div>
                       </div>
@@ -398,92 +675,97 @@ export function App() {
                   ))}
                 </div>
               )}
-            </div>
+            </section>
           </div>
         )}
 
         {/* =========================================================================
-            TAB 2: WATCHDOG ALERTS SCREEN (Walrus Memory Watchdog)
+            SCREEN 2: ALERTS (Upgraded with Severity, Reason, Trust Button, Ignore)
         ========================================================================= */}
         {activeTab === 'alerts' && (
           <div className="flex flex-col gap-md">
-            {/* Watchdog Engine Summary Card */}
-            <div className="bg-primary border border-secondary rounded-xl p-md shadow-xs">
+            {/* Watchdog Status Card (per card.md) */}
+            <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs">
               <div className="flex items-center gap-sm">
                 <div className="w-9 h-9 rounded-lg bg-utility-brand-50 border border-utility-brand-200 flex items-center justify-center text-brand-primary shrink-0">
-                  <Cpu className="w-5 h-5 text-fg-brand-primary shrink-0" />
+                  <ShieldAlert className="size-5 text-fg-brand-primary shrink-0" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-primary">Walrus Watchdog Watch</h3>
-                  <p className="text-xs text-tertiary">Memory-driven anomaly analysis on every expense</p>
+                  <h3 className="text-sm font-semibold text-primary">Watchdog Watch Protocol</h3>
+                  <p className="text-xs text-tertiary">Real-time alerts scored against Walrus Memory habits</p>
                 </div>
               </div>
 
               <div className="mt-md grid grid-cols-3 gap-xs text-center border-t border-secondary pt-sm">
                 <div className="bg-secondary p-xs rounded-lg border border-secondary">
-                  <div className="text-xs text-tertiary">New Peer</div>
-                  <div className="text-sm font-bold text-primary mt-xxs">
-                    {alerts.filter(a => a.rule === 'new_address').length}
-                  </div>
-                </div>
-                <div className="bg-secondary p-xs rounded-lg border border-secondary">
-                  <div className="text-xs text-tertiary">High Volume</div>
-                  <div className="text-sm font-bold text-warning-primary mt-xxs">
-                    {alerts.filter(a => a.rule === 'large_amount').length}
-                  </div>
-                </div>
-                <div className="bg-secondary p-xs rounded-lg border border-secondary">
-                  <div className="text-xs text-tertiary">Duplicate</div>
+                  <div className="text-xs text-tertiary">High Severity</div>
                   <div className="text-sm font-bold text-error-primary mt-xxs">
-                    {alerts.filter(a => a.rule === 'duplicate_payment').length}
+                    {alerts.filter(a => a.severity === 'high').length}
+                  </div>
+                </div>
+                <div className="bg-secondary p-xs rounded-lg border border-secondary">
+                  <div className="text-xs text-tertiary">Medium</div>
+                  <div className="text-sm font-bold text-warning-primary mt-xxs">
+                    {alerts.filter(a => a.severity === 'medium').length}
+                  </div>
+                </div>
+                <div className="bg-secondary p-xs rounded-lg border border-secondary">
+                  <div className="text-xs text-tertiary">Low</div>
+                  <div className="text-sm font-bold text-primary mt-xxs">
+                    {alerts.filter(a => a.severity === 'low').length}
                   </div>
                 </div>
               </div>
-            </div>
+            </section>
 
-            {/* List of Flagged Watchdog Alerts with Plain-Language Reasons */}
+            {/* Alerts List */}
             <div className="flex flex-col gap-sm">
               <div className="flex items-center justify-between px-xs">
                 <span className="text-xs font-semibold text-secondary uppercase tracking-wider">
-                  Watchdog Flags ({alerts.length})
+                  Active Flags ({alerts.length})
                 </span>
-                <span className="text-xs text-tertiary">One-line explanations</span>
+                <span className="text-xs text-tertiary">One-line plain reasons</span>
               </div>
 
               {alerts.length === 0 ? (
-                <div className="bg-primary border border-secondary rounded-xl p-xl text-center flex flex-col items-center justify-center gap-xs shadow-xs">
-                  <ShieldCheck className="w-9 h-9 text-fg-success-primary" />
-                  <div className="text-sm font-semibold text-primary">All Clear</div>
+                <section className="rounded-xl border border-secondary bg-primary p-xl text-center flex flex-col items-center justify-center gap-xs shadow-xs">
+                  <ShieldCheck className="size-9 text-fg-success-primary" />
+                  <div className="text-sm font-semibold text-primary">Zero Anomalies Detected</div>
                   <p className="text-xs text-tertiary max-w-xs">
-                    No transactions breached your usual transfer thresholds, untrusted addresses, or duplicate spend rules.
+                    All transfers conform to your remembered transfer sizes and trusted counterparty memory.
                   </p>
-                </div>
+                </section>
               ) : (
                 alerts.map((alert) => (
                   <div
                     key={alert.id}
-                    className={`bg-primary border rounded-xl p-md shadow-xs flex flex-col gap-xs ${
+                    className={`rounded-xl border bg-primary p-xl shadow-xs flex flex-col gap-sm ${
                       alert.severity === 'high'
                         ? 'border-error-subtle'
                         : 'border-secondary'
                     }`}
                   >
+                    {/* Severity Badge & Rule (per badge.md) */}
                     <div className="flex items-start justify-between gap-sm">
-                      <div className="flex items-center gap-xs">
+                      <div className="flex items-center gap-xs flex-wrap">
+                        {/* Severity Indicator Badge */}
                         <span
-                          className={`inline-flex items-center gap-xs px-sm py-xxs rounded-full text-xs font-semibold ${
+                          className={`inline-flex items-center gap-xs rounded-full border px-md py-xxs text-xs font-medium ${
                             alert.severity === 'high'
-                              ? 'bg-utility-error-50 text-utility-error-700 border border-utility-error-200'
-                              : 'bg-utility-warning-50 text-utility-warning-700 border border-utility-warning-200'
+                              ? 'bg-utility-error-50 border-utility-error-200 text-utility-error-700'
+                              : alert.severity === 'medium'
+                              ? 'bg-utility-warning-50 border-utility-warning-200 text-utility-warning-700'
+                              : 'bg-utility-gray-50 border-utility-gray-200 text-utility-gray-700'
                           }`}
                         >
-                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                          {alert.rule === 'new_address' && 'New Address'}
+                          <AlertTriangle className="size-3 shrink-0" />
+                          {alert.severity.toUpperCase()} SEVERITY
+                        </span>
+
+                        <span className="inline-flex items-center gap-xs rounded-full border border-utility-brand-200 bg-utility-brand-50 px-md py-xxs text-xs font-medium text-utility-brand-700">
+                          {alert.rule === 'new_address' && 'New Counterparty'}
                           {alert.rule === 'large_amount' && 'Unusually Large'}
                           {alert.rule === 'duplicate_payment' && 'Duplicate Payment'}
-                        </span>
-                        <span className="text-xs text-tertiary font-mono">
-                          {alert.amount} {alert.token}
                         </span>
                       </div>
                       <span className="text-xs text-tertiary shrink-0">
@@ -491,20 +773,45 @@ export function App() {
                       </span>
                     </div>
 
-                    {/* One-line plain-language reason as specified */}
-                    <div className="bg-secondary p-sm rounded-lg border border-secondary mt-xxs">
+                    {/* One-Line Plain-Language Reason */}
+                    <div className="bg-secondary p-sm rounded-lg border border-secondary">
                       <p className="text-xs font-medium text-primary leading-relaxed">
                         {alert.reason}
                       </p>
                     </div>
 
-                    <div className="flex items-center justify-between text-xs text-tertiary pt-xxs">
-                      <span className="font-mono truncate max-w-[170px]">
-                        Target: {alert.counterparty}
-                      </span>
-                      <span className="font-mono text-brand-primary">
-                        Tx: {alert.txHash.slice(0, 8)}...
-                      </span>
+                    {/* Target & Actions Row */}
+                    <div className="flex items-center justify-between text-xs pt-xxs gap-sm">
+                      <div className="min-w-0">
+                        <span className="text-tertiary block truncate text-xs font-mono">
+                          Target: {alert.counterparty}
+                        </span>
+                        <span className="text-xs font-semibold text-primary">
+                          Amount: {alert.amount} {alert.token}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-xs shrink-0">
+                        {/* Trust this address button (per button.md secondary) */}
+                        <button
+                          type="button"
+                          onClick={() => handleTrustAddress(alert.counterparty, `Peer ${alert.counterparty.slice(0, 6)}`)}
+                          className="inline-flex items-center gap-sm rounded-lg bg-primary px-lg py-sm text-sm font-semibold text-secondary border border-primary shadow-xs hover:bg-primary-hover focus-visible:ring-2 focus-visible:ring-focus-ring"
+                        >
+                          <UserCheck className="size-4 text-fg-brand-primary shrink-0" />
+                          Trust address
+                        </button>
+
+                        {/* Ignore alert button (per button.md tertiary) */}
+                        <button
+                          type="button"
+                          onClick={() => handleDismissAlert(alert.id)}
+                          className="inline-flex items-center p-sm rounded-lg text-tertiary hover:text-secondary hover:bg-primary-hover focus-visible:ring-2 focus-visible:ring-focus-ring transition-colors"
+                          title="Ignore this alert"
+                        >
+                          <EyeOff className="size-4 shrink-0" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))
@@ -513,76 +820,424 @@ export function App() {
           </div>
         )}
 
-        {/* Placeholders Config & Integration Footnote */}
-        <section className="bg-primary border border-secondary rounded-xl p-md shadow-xs flex flex-col gap-xs">
-          <div className="flex items-center justify-between text-xs font-semibold text-secondary">
-            <span className="flex items-center gap-xs">
-              <Sliders className="w-3.5 h-3.5 text-fg-quaternary shrink-0" />
-              Integration Placeholders
-            </span>
-            <span className="text-tertiary">Server-side</span>
+        {/* =========================================================================
+            SCREEN 3: CHAT (Q&A using Walrus Memory + Tatum Data)
+        ========================================================================= */}
+        {activeTab === 'chat' && (
+          <div className="flex flex-col gap-md">
+            {/* Chat Header Card (per card.md) */}
+            <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs flex items-center justify-between">
+              <div className="flex items-center gap-sm">
+                <div className="w-8 h-8 rounded-lg bg-brand-solid flex items-center justify-center text-primary-on-brand shadow-xs">
+                  <BrainCircuit className="size-4 text-fg-white shrink-0" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-primary">Memory Watchdog Assistant</h3>
+                  <p className="text-xs text-tertiary">Combines Tatum on-chain logs with Walrus habits</p>
+                </div>
+              </div>
+              <span className="inline-flex items-center gap-xs rounded-full border border-utility-brand-200 bg-utility-brand-50 px-md py-xxs text-xs font-medium text-utility-brand-700">
+                Walrus Active
+              </span>
+            </section>
+
+            {/* Quick Prompt Suggestion Chips (per badge.md / button.md) */}
+            <div className="flex flex-col gap-xs">
+              <span className="text-xs font-semibold text-secondary px-xs">Suggested Inquiries</span>
+              <div className="flex gap-xs overflow-x-auto pb-xxs">
+                <button
+                  type="button"
+                  onClick={() => handleSendChat("Did I overpay on fees this month?")}
+                  className="inline-flex items-center gap-sm rounded-full bg-primary px-lg py-sm text-sm font-semibold text-secondary border border-primary shadow-xs hover:bg-primary-hover focus-visible:ring-2 focus-visible:ring-focus-ring whitespace-nowrap"
+                >
+                  "Did I overpay on fees this month?"
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSendChat("Why was this flagged?")}
+                  className="inline-flex items-center gap-sm rounded-full bg-primary px-lg py-sm text-sm font-semibold text-secondary border border-primary shadow-xs hover:bg-primary-hover focus-visible:ring-2 focus-visible:ring-focus-ring whitespace-nowrap"
+                >
+                  "Why was this flagged?"
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSendChat("Who is this address?")}
+                  className="inline-flex items-center gap-sm rounded-full bg-primary px-lg py-sm text-sm font-semibold text-secondary border border-primary shadow-xs hover:bg-primary-hover focus-visible:ring-2 focus-visible:ring-focus-ring whitespace-nowrap"
+                >
+                  "Who is this address?"
+                </button>
+              </div>
+            </div>
+
+            {/* Messages Feed */}
+            <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs flex flex-col gap-md min-h-[320px] max-h-[440px] overflow-y-auto">
+              {chatMessages.map((msg) => (
+                <div
+                  key={msg.id}
+                  className={`flex flex-col gap-xs ${
+                    msg.sender === 'user' ? 'items-end' : 'items-start'
+                  }`}
+                >
+                  <div
+                    className={`p-sm rounded-xl text-xs max-w-[85%] leading-relaxed ${
+                      msg.sender === 'user'
+                        ? 'bg-brand-solid text-primary-on-brand shadow-xs'
+                        : 'bg-secondary text-primary border border-secondary'
+                    }`}
+                  >
+                    {msg.text}
+                  </div>
+
+                  {/* Explicit Walrus Memory Citations */}
+                  {msg.recalledMemories && msg.recalledMemories.length > 0 && (
+                    <div className="bg-primary border border-secondary rounded-lg p-xs text-xs max-w-[85%] flex flex-col gap-xxs shadow-xs">
+                      <div className="flex items-center gap-xxs font-semibold text-brand-primary text-xs">
+                        <Sparkles className="size-3 text-fg-brand-primary shrink-0" />
+                        Ledger Memory recalled from Walrus:
+                      </div>
+                      {msg.recalledMemories.map((mem, i) => (
+                        <div key={i} className="text-tertiary text-xs pl-xs border-l border-brand">
+                          {mem}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <span className="text-tertiary text-xs px-xs">
+                    {formatTimeAgo(msg.timestamp)}
+                  </span>
+                </div>
+              ))}
+
+              {chatLoading && (
+                <div className="flex items-center gap-xs text-tertiary text-xs py-xs">
+                  <RefreshCw className="size-4 animate-spin text-fg-brand-primary shrink-0" />
+                  <span>Consulting Walrus Memory and Tatum data...</span>
+                </div>
+              )}
+            </section>
+
+            {/* Chat Input Field (per input.md & button.md) */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendChat();
+              }}
+              className="flex gap-xs"
+            >
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Ask about fees, addresses, or flags..."
+                className="flex-1 rounded-md bg-primary px-lg py-sm text-sm text-primary placeholder:text-placeholder border border-primary focus-visible:ring-2 focus-visible:ring-focus-ring focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={chatLoading || !chatInput.trim()}
+                className="inline-flex items-center justify-center gap-sm rounded-lg border border-transparent bg-brand-solid px-lg py-sm text-sm font-semibold text-primary-on-brand shadow-xs hover:bg-brand-solid-hover focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50 shrink-0"
+              >
+                <Send className="size-4 shrink-0 text-fg-white" />
+              </button>
+            </form>
           </div>
-          <p className="text-xs text-tertiary leading-relaxed">
-            Walrus Memory endpoint, Aggregator URLs, and the Tatum API Key have clearly marked placeholders in <code className="text-primary font-mono bg-secondary px-xs py-none rounded border border-secondary">server/routes/tatum.mjs</code>.
-          </p>
-        </section>
+        )}
+
+        {/* =========================================================================
+            SCREEN 4: MEMORY (Walrus Profile, Trusted Contacts, Add/Remove Trust)
+        ========================================================================= */}
+        {activeTab === 'memory' && (
+          <div className="flex flex-col gap-md">
+            {/* What Walrus Currently Remembers Card (per card.md) */}
+            <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs flex flex-col gap-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-sm">
+                  <div className="w-8 h-8 rounded-lg bg-utility-brand-50 border border-utility-brand-200 flex items-center justify-center text-brand-primary shrink-0">
+                    <Database className="size-4 text-fg-brand-primary shrink-0" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-primary">Walrus Memory Store</h3>
+                    <p className="text-xs text-tertiary">Decentralized user habits profile</p>
+                  </div>
+                </div>
+                <span className="inline-flex items-center gap-xs rounded-full border border-utility-brand-200 bg-utility-brand-50 px-md py-xxs text-xs font-medium text-utility-brand-700">
+                  Epoch Active
+                </span>
+              </div>
+
+              {/* Habit Metrics */}
+              <div className="grid grid-cols-2 gap-sm pt-xs border-t border-secondary">
+                <div className="bg-secondary p-sm rounded-lg border border-secondary">
+                  <span className="text-tertiary text-xs">Customary Transfer Size</span>
+                  <div className="text-sm font-bold text-primary mt-xxs">
+                    {memoryProfile.minUsualTransferEth} – {memoryProfile.maxUsualTransferEth} ETH
+                  </div>
+                  <span className="text-tertiary text-xs">Deviation triggers flags</span>
+                </div>
+                <div className="bg-secondary p-sm rounded-lg border border-secondary">
+                  <span className="text-tertiary text-xs">Monthly Gas Budget</span>
+                  <div className="text-sm font-bold text-primary mt-xxs">
+                    {memoryProfile.monthlyFeeBudgetEth} ETH
+                  </div>
+                  <span className="text-tertiary text-xs">Avg: {memoryProfile.averageFeeGwei} Gwei</span>
+                </div>
+              </div>
+            </section>
+
+            {/* Favorite Counterparties (per card.md) */}
+            <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs flex flex-col gap-sm">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-semibold text-secondary uppercase tracking-wider">
+                  Favorite Counterparties
+                </h4>
+                <span className="text-xs text-tertiary">Remembered Habits</span>
+              </div>
+
+              <div className="divide-y divide-secondary">
+                {favoriteCounterparties.map((peer) => (
+                  <div key={peer.address} className="py-xs flex items-center justify-between text-xs first:pt-none last:pb-none">
+                    <div>
+                      <div className="font-semibold text-primary">{peer.label}</div>
+                      <div className="text-tertiary font-mono text-xs">{peer.address.slice(0, 10)}...</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-semibold text-secondary">{peer.frequency} txs</div>
+                      <div className="text-tertiary text-xs">{peer.totalVolume}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* Trusted Addresses Manager (Add / Remove) (per card.md, input.md, select.md) */}
+            <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs flex flex-col gap-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-semibold text-primary">Trusted Addresses</h4>
+                  <p className="text-xs text-tertiary">Whitelisted peers saved directly to Walrus Memory</p>
+                </div>
+                <span className="inline-flex items-center gap-xs rounded-full border border-utility-brand-200 bg-utility-brand-50 px-md py-xxs text-xs font-medium text-utility-brand-700">
+                  {trustedAddresses.length} Registered
+                </span>
+              </div>
+
+              {/* Add New Trusted Address Form */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!newTrustAddress.trim()) return;
+                  handleTrustAddress(newTrustAddress.trim(), newTrustName.trim(), newTrustCategory);
+                  setNewTrustAddress('');
+                  setNewTrustName('');
+                }}
+                className="bg-secondary p-sm rounded-lg border border-secondary flex flex-col gap-sm"
+              >
+                <label className="text-sm font-medium text-secondary">Register New Trusted Address</label>
+                <input
+                  type="text"
+                  placeholder="0x... wallet or contract address"
+                  value={newTrustAddress}
+                  onChange={(e) => setNewTrustAddress(e.target.value)}
+                  className="rounded-md bg-primary px-lg py-sm text-sm text-primary placeholder:text-placeholder border border-primary focus-visible:ring-2 focus-visible:ring-focus-ring focus:outline-none"
+                />
+                <div className="flex gap-xs">
+                  <input
+                    type="text"
+                    placeholder="Label name (e.g. Treasury Safe)"
+                    value={newTrustName}
+                    onChange={(e) => setNewTrustName(e.target.value)}
+                    className="flex-1 rounded-md bg-primary px-lg py-sm text-sm text-primary placeholder:text-placeholder border border-primary focus-visible:ring-2 focus-visible:ring-focus-ring focus:outline-none"
+                  />
+                  {/* Select Control per select.md */}
+                  <select
+                    value={newTrustCategory}
+                    onChange={(e) => setNewTrustCategory(e.target.value)}
+                    className="rounded-md bg-primary px-lg py-sm text-sm text-primary border border-primary focus-visible:ring-2 focus-visible:ring-focus-ring focus:outline-none"
+                  >
+                    <option value="Self">Self</option>
+                    <option value="Exchange">Exchange</option>
+                    <option value="DeFi">DeFi</option>
+                    <option value="Partner">Partner</option>
+                    <option value="Custom">Custom</option>
+                  </select>
+                </div>
+                {/* Primary Action Button (per button.md) */}
+                <button
+                  type="submit"
+                  disabled={!newTrustAddress.trim()}
+                  className="inline-flex items-center justify-center gap-sm rounded-lg border border-transparent bg-brand-solid px-lg py-sm text-sm font-semibold text-primary-on-brand shadow-xs hover:bg-brand-solid-hover focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50 mt-xxs"
+                >
+                  <Plus className="size-4 shrink-0" />
+                  Save to Walrus Memory
+                </button>
+              </form>
+
+              {/* Trusted Addresses List */}
+              <div className="divide-y divide-secondary">
+                {trustedAddresses.map((trusted) => (
+                  <div key={trusted.address} className="py-sm first:pt-none last:pb-none flex items-center justify-between gap-sm">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-xs">
+                        <span className="text-xs font-semibold text-primary">{trusted.name}</span>
+                        <span className="inline-flex items-center gap-xs rounded-full border border-utility-gray-200 bg-utility-gray-50 px-md py-xxs text-xs font-medium text-utility-gray-700">
+                          {trusted.category}
+                        </span>
+                      </div>
+                      <div className="text-tertiary font-mono text-xs truncate">
+                        {trusted.address}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleUntrustAddress(trusted.address)}
+                      className="inline-flex items-center p-sm rounded-lg text-tertiary hover:text-error-primary hover:bg-primary-hover focus-visible:ring-2 focus-visible:ring-focus-ring transition-colors shrink-0"
+                      title="Remove from Walrus Memory"
+                    >
+                      <Trash2 className="size-4 shrink-0" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        )}
       </main>
 
-      {/* Config Details Modal */}
+      {/* =========================================================================
+          POLISH 6: BOTTOM NAVIGATION (Wallet, Alerts, Chat, Memory)
+      ========================================================================= */}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-primary border-t border-secondary py-xs shadow-lg">
+        <div className="max-w-md mx-auto grid grid-cols-4 px-sm">
+          {/* 1. Wallet Tab */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('wallet')}
+            className={`flex flex-col items-center justify-center py-xs rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring ${
+              activeTab === 'wallet'
+                ? 'text-brand-primary font-semibold'
+                : 'text-tertiary hover:text-secondary'
+            }`}
+          >
+            <WalletIcon className="size-5 shrink-0" />
+            <span className="text-xs mt-xxs">Wallet</span>
+          </button>
+
+          {/* 2. Alerts Tab */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('alerts')}
+            className={`flex flex-col items-center justify-center py-xs rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring relative ${
+              activeTab === 'alerts'
+                ? 'text-brand-primary font-semibold'
+                : 'text-tertiary hover:text-secondary'
+            }`}
+          >
+            <div className="relative">
+              <Bell className="size-5 shrink-0" />
+              {alerts.length > 0 && (
+                <span className="absolute -top-1 -right-2 bg-error-primary text-primary-on-brand text-xs px-xs py-none rounded-full font-bold">
+                  {alerts.length}
+                </span>
+              )}
+            </div>
+            <span className="text-xs mt-xxs">Alerts</span>
+          </button>
+
+          {/* 3. Chat Tab */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('chat')}
+            className={`flex flex-col items-center justify-center py-xs rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring ${
+              activeTab === 'chat'
+                ? 'text-brand-primary font-semibold'
+                : 'text-tertiary hover:text-secondary'
+            }`}
+          >
+            <MessageSquare className="size-5 shrink-0" />
+            <span className="text-xs mt-xxs">Chat</span>
+          </button>
+
+          {/* 4. Memory Tab */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('memory')}
+            className={`flex flex-col items-center justify-center py-xs rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring ${
+              activeTab === 'memory'
+                ? 'text-brand-primary font-semibold'
+                : 'text-tertiary hover:text-secondary'
+            }`}
+          >
+            <BrainCircuit className="size-5 shrink-0" />
+            <span className="text-xs mt-xxs">Memory</span>
+          </button>
+        </div>
+      </nav>
+
+      {/* Config Details Modal (per dialog.md: bg-overlay opacity-70 + rounded-lg bg-primary shadow-2xl + header/body/footer) */}
       {showConfigModal && (
-        <div className="fixed inset-0 z-50 bg-overlay flex items-center justify-center p-md">
-          <div className="bg-primary border border-secondary rounded-xl max-w-sm w-full p-lg shadow-xl flex flex-col gap-md">
-            <div className="flex items-center justify-between border-b border-secondary pb-sm">
-              <div className="flex items-center gap-xs font-semibold text-primary text-sm">
-                <Sliders className="w-4 h-4 text-fg-brand-primary shrink-0" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-md">
+          {/* Backdrop per dialog.md */}
+          <div 
+            className="fixed inset-0 bg-overlay opacity-70"
+            onClick={() => setShowConfigModal(false)}
+          />
+          {/* Panel per dialog.md */}
+          <div className="relative z-10 flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-lg bg-primary shadow-2xl">
+            <header className="flex items-start justify-between gap-lg border-b border-secondary p-xl">
+              <div className="flex items-center gap-xs font-semibold text-primary text-lg">
+                <Sliders className="size-5 text-fg-brand-primary shrink-0" />
                 Service Placeholders
               </div>
               <button
                 type="button"
                 onClick={() => setShowConfigModal(false)}
-                className="text-tertiary hover:text-primary text-xs px-xs py-xxs rounded"
+                className="text-tertiary hover:text-primary p-xs rounded focus-visible:ring-2 focus-visible:ring-focus-ring"
+                aria-label="Close dialog"
               >
-                Close
+                <X className="size-4" />
               </button>
-            </div>
+            </header>
 
-            <div className="flex flex-col gap-sm text-xs">
+            <div className="min-h-0 flex-1 overflow-y-auto p-xl text-sm text-secondary flex flex-col gap-md">
               <div>
-                <span className="text-tertiary block mb-xxs">Tatum API Key</span>
-                <div className="bg-secondary p-xs rounded-md border border-secondary font-mono text-secondary break-all">
+                <span className="text-tertiary text-xs block mb-xxs">Tatum API Key</span>
+                <div className="bg-secondary p-sm rounded-md border border-secondary font-mono text-xs text-secondary break-all">
                   TATUM_API_KEY (Managed in environment)
                 </div>
               </div>
 
               <div>
-                <span className="text-tertiary block mb-xxs">Walrus Publisher Endpoint</span>
-                <div className="bg-secondary p-xs rounded-md border border-secondary font-mono text-secondary break-all">
+                <span className="text-tertiary text-xs block mb-xxs">Walrus Publisher Endpoint</span>
+                <div className="bg-secondary p-sm rounded-md border border-secondary font-mono text-xs text-secondary break-all">
                   WALRUS_PUBLISHER_URL || https://publisher.walrus-testnet.walrus.space
                 </div>
               </div>
 
               <div>
-                <span className="text-tertiary block mb-xxs">Walrus Aggregator Endpoint</span>
-                <div className="bg-secondary p-xs rounded-md border border-secondary font-mono text-secondary break-all">
+                <span className="text-tertiary text-xs block mb-xxs">Walrus Aggregator Endpoint</span>
+                <div className="bg-secondary p-sm rounded-md border border-secondary font-mono text-xs text-secondary break-all">
                   WALRUS_AGGREGATOR_URL || https://aggregator.walrus-testnet.walrus.space
                 </div>
               </div>
 
               <div>
-                <span className="text-tertiary block mb-xxs">Walrus Memory Epoch</span>
-                <div className="bg-secondary p-xs rounded-md border border-secondary font-mono text-secondary break-all">
+                <span className="text-tertiary text-xs block mb-xxs">Walrus Memory Epoch</span>
+                <div className="bg-secondary p-sm rounded-md border border-secondary font-mono text-xs text-secondary break-all">
                   epoch-walrus-alpha-watchdog-v1
                 </div>
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setShowConfigModal(false)}
-              className="inline-flex items-center justify-center rounded-lg border border-transparent bg-brand-solid px-md py-sm text-xs font-semibold text-primary-on-brand shadow-xs hover:bg-brand-solid-hover"
-            >
-              Done
-            </button>
+            <footer className="flex justify-end gap-sm border-t border-secondary p-xl">
+              <button
+                type="button"
+                onClick={() => setShowConfigModal(false)}
+                className="inline-flex items-center gap-sm rounded-lg border border-transparent bg-brand-solid px-lg py-sm text-sm font-semibold text-primary-on-brand shadow-xs hover:bg-brand-solid-hover focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                Done
+              </button>
+            </footer>
           </div>
         </div>
       )}
