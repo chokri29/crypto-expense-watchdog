@@ -4,5 +4,6 @@ Ledger Memory is a mobile-first UI for Wallet and Alerts. It fetches real-time b
 
 Screens: Wallet and Alerts.
 
-Wallet: the user enters a wallet address; fetch transactions and balance with the Tatum API.
-Alerts: use Walrus Memory to remember the user's usual transfer sizes and trusted addresses, and flag unusual transactions (new address, unusually large amount, duplicate payment) with a one-line plain-language reason.
+* Wallet: the user enters a wallet address; fetch transactions and balance with the Tatum API.
+
+* Alerts: use Walrus Memory to remember the user's usual transfer sizes and trusted addresses, and flag unusual transactions (new address, unusually large amount, duplicate payment) with a one-line plain-language reason.
