@@ -239,6 +239,85 @@ async function fetchTxFeeEth(hash) {
   }
 }
 
+// Resolve ERC-20 metadata through Tatum's Token API. Cache by chain + contract
+// so repeated transactions do not spend another metadata lookup credit.
+const TOKEN_METADATA_CACHE = new Map();
+const TOKEN_METADATA_CACHE_LIMIT = 500;
+
+async function getFungibleTokenMetadata(chain, tokenAddress) {
+  if (!tokenAddress || typeof tokenAddress !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(tokenAddress)) {
+    return null;
+  }
+
+  const normalizedAddress = tokenAddress.toLowerCase();
+  const cacheKey = `${chain}:${normalizedAddress}`;
+  if (TOKEN_METADATA_CACHE.has(cacheKey)) return TOKEN_METADATA_CACHE.get(cacheKey);
+
+  // Store the in-flight promise too, deduplicating concurrent lookups.
+  const lookup = (async () => {
+    try {
+      const response = await tatumFetch(
+        `/v4/data/tokens?chain=${encodeURIComponent(chain)}&tokenAddress=${encodeURIComponent(tokenAddress)}`
+      );
+      if (!response.ok) return null;
+
+      const payload = await response.json();
+      const metadata = Array.isArray(payload) ? payload[0] : (payload?.result ?? payload?.data ?? payload);
+      if (!metadata || typeof metadata !== 'object') return null;
+
+      const symbol = typeof metadata.symbol === 'string' ? metadata.symbol.trim() : '';
+      const name = typeof metadata.name === 'string' ? metadata.name.trim() : '';
+      const decimalsValue = Number(metadata.decimals);
+
+      if (!symbol && !name) return null;
+      return {
+        symbol: symbol || null,
+        name: name || null,
+        decimals: Number.isInteger(decimalsValue) && decimalsValue >= 0 && decimalsValue <= 255
+          ? decimalsValue
+          : null,
+        logo: typeof metadata.logo === 'string' ? metadata.logo : null,
+      };
+    } catch (_) {
+      // Metadata is an enhancement; transaction history should still render.
+      return null;
+    }
+  })();
+
+  TOKEN_METADATA_CACHE.set(cacheKey, lookup);
+  if (TOKEN_METADATA_CACHE.size > TOKEN_METADATA_CACHE_LIMIT) {
+    const oldestKey = TOKEN_METADATA_CACHE.keys().next().value;
+    if (oldestKey !== cacheKey) TOKEN_METADATA_CACHE.delete(oldestKey);
+  }
+
+  const result = await lookup;
+  TOKEN_METADATA_CACHE.set(cacheKey, result);
+  return result;
+}
+
+async function enrichFungibleTransactions(transactions, chain) {
+  const contracts = [...new Set(
+    transactions
+      .filter((tx) => tx.transactionType === 'fungible')
+      .map((tx) => tx.tokenAddress || tx.contractAddress)
+      .filter((address) => typeof address === 'string' && /^0x[0-9a-fA-F]{40}$/.test(address))
+      .map((address) => address.toLowerCase())
+  )];
+
+  const metadataByContract = new Map();
+  await Promise.all(contracts.map(async (contractAddress) => {
+    const metadata = await getFungibleTokenMetadata(chain, contractAddress);
+    if (metadata) metadataByContract.set(contractAddress, metadata);
+  }));
+
+  return transactions.map((tx) => {
+    if (tx.transactionType !== 'fungible') return tx;
+    const contractAddress = (tx.tokenAddress || tx.contractAddress || '').toLowerCase();
+    const metadata = metadataByContract.get(contractAddress);
+    return metadata ? { ...tx, tokenMetadata: metadata } : tx;
+  });
+}
+
 // Helper: Parse value display and category according to exact rules
 function parseTransactionRow(tx, monitoredAddress, receiptFee = 'n/a') {
   const normMonitored = (monitoredAddress || '').toLowerCase()
@@ -407,12 +486,13 @@ router.get('/wallet/transactions', async (req, res) => {
 
     const data = await response.json()
     const rawList = Array.isArray(data.result) ? data.result : []
+    const enrichedList = await enrichFungibleTransactions(rawList, chain)
 
     // Fetch real receipts in parallel (for up to 10 rows to stay within RPC limits)
-    const receiptPromises = rawList.slice(0, 10).map((tx) => fetchTxFeeEth(tx.hash))
+    const receiptPromises = enrichedList.slice(0, 10).map((tx) => fetchTxFeeEth(tx.hash))
     const fees = await Promise.all(receiptPromises)
 
-    const formattedTxs = rawList.map((tx, idx) => {
+    const formattedTxs = enrichedList.map((tx, idx) => {
       const fee = idx < fees.length ? fees[idx] : 'n/a'
       return parseTransactionRow(tx, address, fee)
     })
