@@ -365,7 +365,7 @@ function parseTransactionRow(tx, monitoredAddress, receiptFee = 'n/a') {
     numericEth = 0
     valueDisplay = '1 NFT'
   } else if (txType === 'fungible') {
-    const sym = tx.tokenSymbol || 'Token'
+    const sym = tx.tokenSymbol || tx.tokenMetadata?.symbol || 'Unknown token'
     tokenSymbol = sym
     numericEth = 0
     const amtNum = Math.abs(parseFloat(tx.amount || '0'))
