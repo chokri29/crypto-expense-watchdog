@@ -169,8 +169,10 @@ export function App() {
   };
 
   useEffect(() => {
-    fetchStatus();
-    loadAllData(activeAddress, demoMode);
+    (async () => {
+      const useDemo = await fetchStatus();
+      loadAllData(activeAddress, useDemo);
+    })();
   }, []);
 
   const fetchStatus = async () => {
@@ -178,12 +180,13 @@ export function App() {
       const res = await fetch('/api/tatum/status');
       if (res.ok) {
         const data = await res.json();
-        setHasTatumKey(data.hasTatumKey);
-        if (data.defaultDemo || !data.hasTatumKey) {
-          setDemoMode(true);
-        }
+        const useDemo = Boolean(data.defaultDemo || !data.hasTatumKey);
+        setHasTatumKey(Boolean(data.hasTatumKey));
+        if (useDemo) setDemoMode(true);
+        return useDemo;
       }
     } catch (_) {}
+    return false;
   };
 
   const loadAllData = async (targetAddress: string, isDemo: boolean) => {
