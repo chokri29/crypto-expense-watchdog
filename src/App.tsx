@@ -106,6 +106,26 @@ interface ChatMessage {
 }
 
 export function App() {
+  const { isLoaded, isSignedIn, getToken } = useAuth();
+
+const apiFetch = async (
+  input: RequestInfo | URL,
+  init: RequestInit = {}
+) => {
+  const token = await getToken();
+
+  if (!token) {
+    throw new Error('Authentication required. Please sign in.');
+  }
+
+  const headers = new Headers(init.headers);
+  headers.set('Authorization', `Bearer ${token}`);
+
+  return fetch(input, {
+    ...init,
+    headers,
+  });
+};
   const [activeTab, setActiveTab] = useState<'wallet' | 'alerts' | 'chat' | 'memory'>('wallet');
   const [addressInput, setAddressInput] = useState('0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045');
   const [activeAddress, setActiveAddress] = useState('0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045');
