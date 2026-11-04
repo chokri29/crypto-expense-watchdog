@@ -429,6 +429,21 @@ const apiFetch = async (
     return `${diffDays}d ago`;
   };
 
+  if (!isLoaded) {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      Loading authentication...
+    </div>
+  );
+}
+
+if (!isSignedIn) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-secondary p-4">
+      <SignIn routing="hash" />
+    </div>
+  );
+}
   return (
     <div className="min-h-screen bg-secondary text-primary flex flex-col font-sans pb-11xl">
       {/* Toast Notification */}
