@@ -191,11 +191,13 @@ const apiFetch = async (
   };
 
   useEffect(() => {
-    (async () => {
-      const useDemo = await fetchStatus();
-      loadAllData(activeAddress, useDemo);
-    })();
-  }, []);
+  if (!isLoaded || !isSignedIn) return;
+
+  (async () => {
+    const useDemo = await fetchStatus();
+    await loadAllData(activeAddress, useDemo);
+  })();
+}, [isLoaded, isSignedIn]);
 
   const fetchStatus = async () => {
     try {
