@@ -1,3 +1,5 @@
+import { useAuth, SignIn } from '@clerk/react';
+
 import React, { useState, useEffect } from 'react';
 import { 
   ShieldAlert, 
