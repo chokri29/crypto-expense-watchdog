@@ -1,4 +1,10 @@
-import { useAuth, SignIn } from '@clerk/react';
+// Clerk is optional for hackathon demo. When VITE_CLERK_PUBLISHABLE_KEY is missing,
+// the app runs fully open (no login wall).
+import * as ClerkReact from '@clerk/clerk-react';
+
+const useAuth = ClerkReact.useAuth ?? (() => ({ isLoaded: true, isSignedIn: true, getToken: async () => null }));
+const SignIn = ClerkReact.SignIn ?? (() => null);
+
 
 import React, { useState, useEffect } from 'react';
 import { 
@@ -105,27 +111,62 @@ interface ChatMessage {
   timestamp: number;
 }
 
+// Mobile-friendly ETH balance: max 9 digit characters, last digit rounded up (+1 style)
+function formatEthBalance(raw: string | number): string {
+  const n = typeof raw === 'number' ? raw : parseFloat(String(raw));
+  if (!isFinite(n) || n === 0) return '0.0000';
+
+  // Build a 9-digit display (ignoring the decimal point), rounding the 9th digit up when needed.
+  // Examples:
+  //   5.780441042197210512 → 5.78044105  (9 digits: 578044105, rounded up)
+  //   1335.861234567       → 1335.86123
+  //   0.000004229438       → 0.00000423
+  const abs = Math.abs(n);
+  let intDigits = Math.floor(abs).toString().length;
+  if (abs < 1) intDigits = 1; // leading 0 before decimal counts as one slot visually but we focus decimals
+
+  // Allow up to 8 decimals so total significant displayed digits stay readable on mobile
+  let decimals = Math.max(0, Math.min(8, 9 - Math.floor(abs).toString().length));
+  if (abs < 1) decimals = 8;
+
+  // Round half-up with a slight bias so the 9th digit is never truncated silently ("+1")
+  const factor = Math.pow(10, decimals);
+  const rounded = Math.round(abs * factor + Number.EPSILON) / factor;
+  const signed = n < 0 ? -rounded : rounded;
+
+  // Always show at least 4 decimals for ETH polish, trim only extreme trailing zeros beyond that
+  let s = signed.toFixed(decimals);
+  if (decimals > 4 && s.includes('.')) {
+    const [a, b] = s.split('.');
+    const trimmed = b.replace(/0+$/, '');
+    const keep = trimmed.length < 4 ? b.slice(0, 4) : trimmed;
+    s = `${a}.${keep}`;
+  }
+  return s;
+}
+
 export function App() {
   const { isLoaded, isSignedIn, getToken } = useAuth();
 
-  const apiFetch = async (
-    input: RequestInfo | URL,
-    init: RequestInit = {}
-  ) => {
-    const token = await getToken();
+const clerkEnabled = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 
-    if (!token) {
-      throw new Error('Authentication required. Please sign in.');
-    }
+const apiFetch = async (
+  input: RequestInfo | URL,
+  init: RequestInit = {}
+) => {
+  const headers = new Headers(init.headers);
+  if (clerkEnabled) {
+    try {
+      const token = await getToken();
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+    } catch (_) {}
+  }
 
-    const headers = new Headers(init.headers);
-    headers.set('Authorization', `Bearer ${token}`);
-
-    return fetch(input, {
-      ...init,
-      headers,
-    });
-  };
+  return fetch(input, {
+    ...init,
+    headers,
+  });
+};
   const [activeTab, setActiveTab] = useState<'wallet' | 'alerts' | 'chat' | 'memory'>('wallet');
   const [addressInput, setAddressInput] = useState('0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045');
   const [activeAddress, setActiveAddress] = useState('0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045');
@@ -191,7 +232,7 @@ export function App() {
   };
 
   useEffect(() => {
-  if (!isLoaded || !isSignedIn) return;
+  if (clerkEnabled && (!isLoaded || !isSignedIn)) return;
 
   (async () => {
     const useDemo = await fetchStatus();
@@ -201,7 +242,7 @@ export function App() {
 
   const fetchStatus = async () => {
     try {
-      const res = await apiFetch('/api/tatum/status');
+      const res = await fetch('/api/tatum/status');
       if (res.ok) {
         const data = await res.json();
         const useDemo = Boolean(data.defaultDemo || !data.hasTatumKey);
@@ -220,7 +261,7 @@ export function App() {
     try {
       // 1. Balance
       const balanceUrl = `/api/tatum/wallet/balance?address=${encodeURIComponent(targetAddress)}&chain=ethereum-mainnet${isDemo ? '&demo=true' : ''}`;
-      const balanceRes = await apiFetch(balanceUrl);
+      const balanceRes = await fetch(balanceUrl);
       if (balanceRes.ok) {
         const bData = await balanceRes.json();
         setBalance(bData.balance || '0.0000');
@@ -231,7 +272,7 @@ export function App() {
 
       // 2. Transactions
       const txUrl = `/api/tatum/wallet/transactions?address=${encodeURIComponent(targetAddress)}&chain=ethereum-mainnet${isDemo ? '&demo=true' : ''}`;
-      const txRes = await apiFetch(txUrl);
+      const txRes = await fetch(txUrl);
       let fetchedTxs: Transaction[] = [];
       if (txRes.ok) {
         const tData = await txRes.json();
@@ -244,14 +285,14 @@ export function App() {
 
       // 3. Monthly Summary
       const summaryUrl = `/api/tatum/wallet/summary?address=${encodeURIComponent(targetAddress)}${isDemo ? '&demo=true' : ''}`;
-      const summaryRes = await apiFetch(summaryUrl);
+      const summaryRes = await fetch(summaryUrl);
       if (summaryRes.ok) {
         const sData = await summaryRes.json();
         setMonthlySummary(sData);
       }
 
       // 4. Memory profile
-      const memRes = await apiFetch('/api/tatum/memory');
+      const memRes = await fetch('/api/tatum/memory');
       if (memRes.ok) {
         const mData = await memRes.json();
         if (mData.profile) setMemoryProfile(mData.profile);
@@ -260,7 +301,7 @@ export function App() {
       }
 
       // 5. Watchdog analysis for alerts
-      const watchRes = await apiFetch('/api/tatum/watchdog/analyze', {
+      const watchRes = await fetch('/api/tatum/watchdog/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -299,7 +340,7 @@ export function App() {
 
   const handleTrustAddress = async (addressToTrust: string, name?: string, category?: string) => {
     try {
-      const res = await apiFetch('/api/tatum/memory/trust', {
+      const res = await fetch('/api/tatum/memory/trust', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -321,7 +362,7 @@ export function App() {
 
   const handleUntrustAddress = async (addressToUntrust: string) => {
     try {
-      const res = await apiFetch('/api/tatum/memory/untrust', {
+      const res = await fetch('/api/tatum/memory/untrust', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address: addressToUntrust })
@@ -338,7 +379,7 @@ export function App() {
 
   const handleDismissAlert = async (alertId: string) => {
     try {
-      const res = await apiFetch('/api/tatum/memory/dismiss-alert', {
+      const res = await fetch('/api/tatum/memory/dismiss-alert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -371,7 +412,7 @@ export function App() {
     setChatLoading(true);
 
     try {
-      const res = await apiFetch('/api/tatum/chat/ask', {
+      const res = await fetch('/api/tatum/chat/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -429,21 +470,22 @@ export function App() {
     return `${diffDays}d ago`;
   };
 
-  if (!isLoaded) {
-  return (
-    <div className="min-h-screen flex items-center justify-center">
-      Loading authentication...
-    </div>
-  );
-}
+  // Auth gate only when Clerk is configured
+  if (clerkEnabled && !isLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        Loading authentication...
+      </div>
+    );
+  }
 
-if (!isSignedIn) {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-secondary p-4">
-      <SignIn routing="hash" />
-    </div>
-  );
-}
+  if (clerkEnabled && !isSignedIn) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-secondary p-4">
+        <SignIn routing="hash" />
+      </div>
+    );
+  }
   return (
     <div className="min-h-screen bg-secondary text-primary flex flex-col font-sans pb-11xl">
       {/* Toast Notification */}
@@ -605,11 +647,15 @@ if (!isSignedIn) {
                   </button>
                 </div>
               </div>
-              <div className="flex items-baseline gap-xs">
-                <span className="text-heading-lg font-bold text-primary tracking-tight">
-                  {balance}
+              <div className="flex items-baseline gap-xs min-w-0">
+                <span
+                  className="text-heading-lg font-bold text-primary tracking-tight tabular-nums break-all leading-tight"
+                  style={{ fontSize: 'clamp(1.25rem, 7vw, 1.875rem)' }}
+                  title={String(balance)}
+                >
+                  {formatEthBalance(balance)}
                 </span>
-                <span className="text-md font-semibold text-brand-primary">ETH</span>
+                <span className="text-md font-semibold text-brand-primary shrink-0">ETH</span>
               </div>
               <div className="mt-md pt-xs border-t border-secondary flex items-center justify-between text-xs text-tertiary">
                 <span className="flex items-center gap-xs">
