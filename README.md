@@ -109,3 +109,45 @@ It also competes for the **Best Tatum AI Builder** special award.
 Chokri (@chokri29)
 
 Built for the Tatum × Walrus Total Recall Hackathon – November 2026
+
+---
+
+## Environment variables (Vercel / local)
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `TATUM_API_KEY` | Yes | Live balance & transactions |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Optional | Enable signup / login wall |
+| `WALRUS_PUBLISHER_URL` | For Mainnet | e.g. Mainnet publisher URL |
+| `WALRUS_AGGREGATOR_URL` | Optional | Aggregator for reads |
+| `WALRUS_EPOCHS` | Optional | Blob storage epochs (default 5) |
+
+### Seed ≥10 Walrus memories
+
+After deploy, call once:
+
+```
+POST /api/tatum/memory/seed
+```
+
+Or open the Memory tab — the first load will auto-seed. Check `publishedCount` and `blobId` fields in the response.
+
+For **Mainnet**, set `WALRUS_PUBLISHER_URL` to the Mainnet publisher endpoint in Vercel env vars and redeploy, then hit `/api/tatum/memory/seed` again.
+
+---
+
+## Walrus Mainnet owner wallet
+
+Configured Sui address (will own blob objects when Mainnet writes are enabled):
+
+```
+0x66ef4fe9c04d9da0f1645d7255774aed557d27ebc2c59da1049c6757ee9cec65
+```
+
+Override with env: `SUI_MEMORY_OWNER`
+
+### Current write path
+- **Now:** public **Testnet** publisher (works without funds)
+- **After refill:** set `WALRUS_PUBLISHER_URL` to a Mainnet-capable path (private publisher or funded upload flow) and re-run `POST /api/tatum/memory/seed`
+
+Every published memory payload includes this owner address and uses `send_object_to` when the publisher supports it.
