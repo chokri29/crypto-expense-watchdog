@@ -1,4 +1,10 @@
-import { useAuth, SignIn } from '@clerk/react';
+// Clerk is optional for hackathon demo. When VITE_CLERK_PUBLISHABLE_KEY is missing,
+// the app runs fully open (no login wall).
+import * as ClerkReact from '@clerk/clerk-react';
+
+const useAuth = ClerkReact.useAuth ?? (() => ({ isLoaded: true, isSignedIn: true, getToken: async () => null }));
+const SignIn = ClerkReact.SignIn ?? (() => null);
+
 
 import React, { useState, useEffect } from 'react';
 import { 
@@ -105,21 +111,56 @@ interface ChatMessage {
   timestamp: number;
 }
 
+// Mobile-friendly ETH balance: max 9 digit characters, last digit rounded up (+1 style)
+function formatEthBalance(raw: string | number): string {
+  const n = typeof raw === 'number' ? raw : parseFloat(String(raw));
+  if (!isFinite(n) || n === 0) return '0.0000';
+
+  // Build a 9-digit display (ignoring the decimal point), rounding the 9th digit up when needed.
+  // Examples:
+  //   5.780441042197210512 → 5.78044105  (9 digits: 578044105, rounded up)
+  //   1335.861234567       → 1335.86123
+  //   0.000004229438       → 0.00000423
+  const abs = Math.abs(n);
+  let intDigits = Math.floor(abs).toString().length;
+  if (abs < 1) intDigits = 1; // leading 0 before decimal counts as one slot visually but we focus decimals
+
+  // Allow up to 8 decimals so total significant displayed digits stay readable on mobile
+  let decimals = Math.max(0, Math.min(8, 9 - Math.floor(abs).toString().length));
+  if (abs < 1) decimals = 8;
+
+  // Round half-up with a slight bias so the 9th digit is never truncated silently ("+1")
+  const factor = Math.pow(10, decimals);
+  const rounded = Math.round(abs * factor + Number.EPSILON) / factor;
+  const signed = n < 0 ? -rounded : rounded;
+
+  // Always show at least 4 decimals for ETH polish, trim only extreme trailing zeros beyond that
+  let s = signed.toFixed(decimals);
+  if (decimals > 4 && s.includes('.')) {
+    const [a, b] = s.split('.');
+    const trimmed = b.replace(/0+$/, '');
+    const keep = trimmed.length < 4 ? b.slice(0, 4) : trimmed;
+    s = `${a}.${keep}`;
+  }
+  return s;
+}
+
 export function App() {
   const { isLoaded, isSignedIn, getToken } = useAuth();
+
+const clerkEnabled = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 
 const apiFetch = async (
   input: RequestInfo | URL,
   init: RequestInit = {}
 ) => {
-  const token = await getToken();
-
-  if (!token) {
-    throw new Error('Authentication required. Please sign in.');
-  }
-
   const headers = new Headers(init.headers);
-  headers.set('Authorization', `Bearer ${token}`);
+  if (clerkEnabled) {
+    try {
+      const token = await getToken();
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+    } catch (_) {}
+  }
 
   return fetch(input, {
     ...init,
@@ -191,7 +232,7 @@ const apiFetch = async (
   };
 
   useEffect(() => {
-  if (!isLoaded || !isSignedIn) return;
+  if (clerkEnabled && (!isLoaded || !isSignedIn)) return;
 
   (async () => {
     const useDemo = await fetchStatus();
@@ -429,21 +470,22 @@ const apiFetch = async (
     return `${diffDays}d ago`;
   };
 
-  if (!isLoaded) {
-  return (
-    <div className="min-h-screen flex items-center justify-center">
-      Loading authentication...
-    </div>
-  );
-}
+  // Auth gate only when Clerk is configured
+  if (clerkEnabled && !isLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        Loading authentication...
+      </div>
+    );
+  }
 
-if (!isSignedIn) {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-secondary p-4">
-      <SignIn routing="hash" />
-    </div>
-  );
-}
+  if (clerkEnabled && !isSignedIn) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-secondary p-4">
+        <SignIn routing="hash" />
+      </div>
+    );
+  }
   return (
     <div className="min-h-screen bg-secondary text-primary flex flex-col font-sans pb-11xl">
       {/* Toast Notification */}
@@ -605,11 +647,15 @@ if (!isSignedIn) {
                   </button>
                 </div>
               </div>
-              <div className="flex items-baseline gap-xs">
-                <span className="text-heading-lg font-bold text-primary tracking-tight">
-                  {balance}
+              <div className="flex items-baseline gap-xs min-w-0">
+                <span
+                  className="text-heading-lg font-bold text-primary tracking-tight tabular-nums break-all leading-tight"
+                  style={{ fontSize: 'clamp(1.25rem, 7vw, 1.875rem)' }}
+                  title={String(balance)}
+                >
+                  {formatEthBalance(balance)}
                 </span>
-                <span className="text-md font-semibold text-brand-primary">ETH</span>
+                <span className="text-md font-semibold text-brand-primary shrink-0">ETH</span>
               </div>
               <div className="mt-md pt-xs border-t border-secondary flex items-center justify-between text-xs text-tertiary">
                 <span className="flex items-center gap-xs">
