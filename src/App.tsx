@@ -487,7 +487,7 @@ const apiFetch = async (
     );
   }
   return (
-    <div className="min-h-screen bg-secondary text-primary flex flex-col font-sans pb-11xl">
+    <div className="app-shell min-h-screen text-primary flex flex-col font-sans">
       {/* Toast Notification */}
       {successToast && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-start gap-sm rounded-lg border border-secondary bg-primary p-lg shadow-lg">
@@ -497,56 +497,35 @@ const apiFetch = async (
       )}
 
       {/* Top Mobile Header */}
-      <header className="sticky top-0 z-30 bg-primary border-b border-secondary px-lg py-sm shadow-xs">
-        <div className="max-w-md mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-sm">
-            <div className="w-8 h-8 rounded-lg bg-brand-solid flex items-center justify-center text-primary-on-brand shadow-xs">
+      <header className="app-header sticky top-0 z-30">
+        <div className="max-w-md mx-auto flex items-center justify-between gap-sm px-lg py-md">
+          <div className="flex items-center gap-sm min-w-0">
+            <div className="app-mark shrink-0">
               <ShieldAlert className="size-4 text-fg-white shrink-0" />
             </div>
-            <div>
-              <div className="flex items-center gap-xs">
-                <span className="text-md font-semibold text-primary tracking-tight">Ledger Memory</span>
-                {/* Visible Data Source Badge */}
-                {demoMode ? (
-                  <span className="inline-flex items-center gap-xs rounded-full border border-utility-brand-200 bg-utility-brand-50 px-md py-xxs text-xs font-medium text-utility-brand-700">
-                    Sample data
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-xs rounded-full border border-utility-success-200 bg-utility-success-50 px-md py-xxs text-xs font-medium text-utility-success-700">
-                    <span className="w-1.5 h-1.5 rounded-full bg-success-primary animate-pulse" />
-                    Live data from Tatum
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-tertiary">Expense watchdog & memory guardian</p>
+            <div className="min-w-0">
+              <div className="text-md font-semibold text-primary tracking-tight leading-tight">Ledger Memory</div>
+              <p className="text-xs text-tertiary truncate">Expense watchdog</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-xs">
-            {/* Demo Mode Toggle Button */}
+          <div className="flex items-center gap-xs shrink-0">
             <button
               type="button"
               onClick={handleToggleDemo}
-              className={`inline-flex items-center gap-xs rounded-full border px-md py-xxs text-xs font-semibold shadow-xs transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring ${
+              className={`inline-flex items-center gap-xs rounded-full border px-sm py-xxs text-xs font-semibold shadow-xs transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring ${
                 demoMode
                   ? 'border-utility-brand-200 bg-utility-brand-50 text-utility-brand-700'
                   : 'bg-primary text-secondary border-primary hover:bg-primary-hover'
               }`}
             >
               {demoMode ? (
-                <>
-                  <ToggleRight className="size-4 text-fg-brand-primary shrink-0" />
-                  <span>Demo</span>
-                </>
+                <ToggleRight className="size-4 text-fg-brand-primary shrink-0" />
               ) : (
-                <>
-                  <ToggleLeft className="size-4 text-fg-quaternary shrink-0" />
-                  <span>Live</span>
-                </>
+                <ToggleLeft className="size-4 text-fg-quaternary shrink-0" />
               )}
+              <span>{demoMode ? 'Demo' : 'Live'}</span>
             </button>
-
-            {/* Config modal button */}
             <button
               type="button"
               onClick={() => setShowConfigModal(true)}
@@ -622,47 +601,48 @@ const apiFetch = async (
         {activeTab === 'wallet' && (
           <div className="flex flex-col gap-md">
             {/* Balance Overview Card */}
-            <section className="rounded-xl border border-secondary bg-primary p-xl shadow-xs">
-              <div className="flex items-center justify-between text-xs text-tertiary mb-xs">
-                <span>Verified Balance</span>
-                {/* Etherscan Address Chip (Requirement 5) */}
-                <div className="flex items-center gap-xs">
-                  <a
-                    href={`https://etherscan.io/address/${activeAddress}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-mono text-xs text-secondary bg-secondary px-xs py-xxs rounded-md border border-secondary hover:text-brand-primary flex items-center gap-xxs"
-                    title="View address on Etherscan"
-                  >
-                    <span>{activeAddress.slice(0, 6)}...{activeAddress.slice(-4)}</span>
-                    <ExternalLink className="size-3 text-fg-quaternary" />
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => copyToClipboard(activeAddress, 'address')}
-                    className="p-xxs text-tertiary hover:text-primary rounded"
-                    title="Copy address"
-                  >
-                    <Copy className="size-3" />
-                  </button>
+            <section className="hero-card">
+              <div className="relative z-10">
+                <div className="flex items-center justify-between text-xs mb-sm opacity-90">
+                  <span className="font-medium tracking-wide">Verified balance</span>
+                  <div className="flex items-center gap-xs">
+                    <a
+                      href={`https://etherscan.io/address/${activeAddress}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hero-chip"
+                      title="View address on Etherscan"
+                    >
+                      <span>{activeAddress.slice(0, 6)}...{activeAddress.slice(-4)}</span>
+                      <ExternalLink className="size-3" />
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(activeAddress, 'address')}
+                      className="hero-chip"
+                      title="Copy address"
+                    >
+                      <Copy className="size-3" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-baseline gap-xs min-w-0">
-                <span
-                  className="text-heading-lg font-bold text-primary tracking-tight tabular-nums break-all leading-tight"
-                  style={{ fontSize: 'clamp(1.25rem, 7vw, 1.875rem)' }}
-                  title={String(balance)}
-                >
-                  {formatEthBalance(balance)}
-                </span>
-                <span className="text-md font-semibold text-brand-primary shrink-0">ETH</span>
-              </div>
-              <div className="mt-md pt-xs border-t border-secondary flex items-center justify-between text-xs text-tertiary">
-                <span className="flex items-center gap-xs">
-                  <Sparkles className="size-4 text-fg-brand-primary shrink-0" />
-                  {demoMode ? 'Sample data' : 'Live data from Tatum'}
-                </span>
-                <span>Ethereum</span>
+                <div className="flex items-baseline gap-xs min-w-0">
+                  <span
+                    className="font-semibold tracking-tight tabular-nums break-all leading-none"
+                    style={{ fontSize: 'clamp(2rem, 10vw, 2.75rem)' }}
+                    title={String(balance)}
+                  >
+                    {formatEthBalance(balance)}
+                  </span>
+                  <span className="text-md font-medium opacity-80 shrink-0">ETH</span>
+                </div>
+                <div className="mt-lg flex items-center justify-between text-xs opacity-80">
+                  <span className="flex items-center gap-xs">
+                    <Sparkles className="size-4 shrink-0" />
+                    {demoMode ? 'Sample data' : 'Live from Tatum'}
+                  </span>
+                  <span>Ethereum</span>
+                </div>
               </div>
             </section>
 
@@ -820,7 +800,7 @@ const apiFetch = async (
                           className="font-mono text-xs text-secondary hover:text-brand-primary flex items-center gap-xxs truncate max-w-[280px]"
                           title="Open transaction on Etherscan"
                         >
-                          <span className="truncate">{tx.hash}</span>
+                          <span className="truncate">{tx.hash.slice(0, 10)}…{tx.hash.slice(-6)}</span>
                           <ExternalLink className="size-3 text-fg-quaternary shrink-0" />
                         </a>
                         <button
@@ -1263,12 +1243,13 @@ const apiFetch = async (
       </main>
 
       {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-primary border-t border-secondary py-xs shadow-lg">
-        <div className="max-w-md mx-auto grid grid-cols-4 px-sm">
+      <nav className="app-dock">
+        <div className="grid grid-cols-4">
           <button
             type="button"
+            data-active={activeTab === 'wallet'}
             onClick={() => setActiveTab('wallet')}
-            className={`flex flex-col items-center justify-center py-xs rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring ${
+            className={`flex flex-col items-center justify-center py-sm rounded-xl transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring ${
               activeTab === 'wallet'
                 ? 'text-brand-primary font-semibold'
                 : 'text-tertiary hover:text-secondary'
@@ -1280,8 +1261,9 @@ const apiFetch = async (
 
           <button
             type="button"
+            data-active={activeTab === 'alerts'}
             onClick={() => setActiveTab('alerts')}
-            className={`flex flex-col items-center justify-center py-xs rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring relative ${
+            className={`flex flex-col items-center justify-center py-sm rounded-xl transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring relative ${
               activeTab === 'alerts'
                 ? 'text-brand-primary font-semibold'
                 : 'text-tertiary hover:text-secondary'
@@ -1300,8 +1282,9 @@ const apiFetch = async (
 
           <button
             type="button"
+            data-active={activeTab === 'chat'}
             onClick={() => setActiveTab('chat')}
-            className={`flex flex-col items-center justify-center py-xs rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring ${
+            className={`flex flex-col items-center justify-center py-sm rounded-xl transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring ${
               activeTab === 'chat'
                 ? 'text-brand-primary font-semibold'
                 : 'text-tertiary hover:text-secondary'
@@ -1313,8 +1296,9 @@ const apiFetch = async (
 
           <button
             type="button"
+            data-active={activeTab === 'memory'}
             onClick={() => setActiveTab('memory')}
-            className={`flex flex-col items-center justify-center py-xs rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring ${
+            className={`flex flex-col items-center justify-center py-sm rounded-xl transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring ${
               activeTab === 'memory'
                 ? 'text-brand-primary font-semibold'
                 : 'text-tertiary hover:text-secondary'

@@ -9,7 +9,105 @@
 /* Tatum foundation — read through the tokens, never hardcoded. The full system
    (component anatomy, states, layout) is in the `tatum-design` skill. */
 body {
-  background-color: var(--color-bg-primary);
+  background-color: var(--color-bg-secondary);
   color: var(--color-text-primary);
   font-family: var(--font-family-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.app-shell {
+  background:
+    radial-gradient(720px 360px at 50% -120px, color-mix(in srgb, var(--color-bg-brand-solid) 22%, transparent), transparent 70%),
+    var(--color-bg-secondary);
+  padding-bottom: 7.5rem;
+}
+
+.app-header {
+  background: color-mix(in srgb, var(--color-bg-primary) 82%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-secondary) 80%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.app-mark {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(160deg, var(--color-bg-brand-solid), color-mix(in srgb, var(--color-bg-brand-solid) 62%, black));
+  box-shadow: 0 8px 18px -10px color-mix(in srgb, var(--color-bg-brand-solid) 90%, transparent);
+}
+
+.hero-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1.35rem;
+  padding: 1.25rem 1.25rem 1rem;
+  color: var(--color-text-primary-on-brand);
+  background:
+    radial-gradient(90% 80% at 100% 0%, color-mix(in srgb, white 24%, transparent), transparent 52%),
+    linear-gradient(155deg, var(--color-bg-brand-solid) 0%, color-mix(in srgb, var(--color-bg-brand-solid) 48%, black) 100%);
+  box-shadow: 0 22px 40px -22px color-mix(in srgb, var(--color-bg-brand-solid) 85%, transparent);
+}
+
+.hero-card::after {
+  content: "";
+  position: absolute;
+  right: -2.5rem;
+  bottom: -2.75rem;
+  width: 9rem;
+  height: 9rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, white 22%, transparent);
+  background: color-mix(in srgb, white 8%, transparent);
+  pointer-events: none;
+}
+
+.hero-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  color: var(--color-text-primary-on-brand);
+  background: color-mix(in srgb, white 14%, transparent);
+  border: 1px solid color-mix(in srgb, white 22%, transparent);
+}
+
+.hero-chip:hover {
+  background: color-mix(in srgb, white 22%, transparent);
+}
+
+.app-dock {
+  position: fixed;
+  z-index: 40;
+  left: 50%;
+  bottom: 0.75rem;
+  transform: translateX(-50%);
+  width: min(28rem, calc(100% - 1.25rem));
+  border-radius: 1.35rem;
+  border: 1px solid color-mix(in srgb, var(--color-border-secondary) 90%, transparent);
+  background: color-mix(in srgb, var(--color-bg-primary) 88%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 16px 40px -18px rgb(12 14 18 / 40%);
+  padding: 0.3rem;
+}
+
+.app-dock button[data-active="true"] {
+  background: color-mix(in srgb, var(--color-bg-brand-solid) 12%, var(--color-bg-primary));
+  border-radius: 1rem;
+}
+
+main section.rounded-xl {
+  box-shadow: 0 1px 2px rgb(16 24 40 / 4%), 0 14px 30px -22px rgb(16 24 40 / 28%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse,
+  .animate-spin {
+    animation: none;
+  }
 }
