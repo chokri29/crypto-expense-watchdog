@@ -113,19 +113,21 @@ interface MemoryStoreStatus {
   ownerAddressConfigured: boolean;
 }
 
-const MEMORY_ROOT_STORAGE_KEY = 'ledger-memory:walrus-testnet:root:v1';
+function getMemoryRootStorageKey(network = 'testnet'): string {
+  return `ledger-memory:walrus-${network}:root:v1`;
+}
 
-function getStoredMemoryRoot(): string {
+function getStoredMemoryRoot(network = 'testnet'): string {
   try {
-    return localStorage.getItem(MEMORY_ROOT_STORAGE_KEY) || '';
+    return localStorage.getItem(getMemoryRootStorageKey(network)) || '';
   } catch {
     return '';
   }
 }
 
-function storeMemoryRoot(rootBlobId: string): void {
+function storeMemoryRoot(rootBlobId: string, network = 'testnet'): void {
   try {
-    localStorage.setItem(MEMORY_ROOT_STORAGE_KEY, rootBlobId);
+    localStorage.setItem(getMemoryRootStorageKey(network), rootBlobId);
   } catch {
     throw new Error('This browser could not persist the Walrus root blob ID locally.');
   }
@@ -177,7 +179,7 @@ export function App() {
     {
       id: 'welcome-msg',
       sender: 'assistant',
-      text: "Hello! I am Ledger Memory Watchdog. Initialize your Walrus Testnet memory in the Memory tab, then I can retrieve your saved transfer habits and trusted contacts. I can also help interpret your Tatum wallet data.",
+      text: "Hello! I am Ledger Memory Watchdog. Initialize your Walrus memory in the Memory tab, then I can retrieve your saved transfer habits and trusted contacts. I can also help interpret your Tatum wallet data.",
       recalledMemories: [],
       timestamp: Date.now() - 1000 * 60 * 5
     }
@@ -265,16 +267,24 @@ export function App() {
       }
 
       // 4. Retrieve the Walrus manifest using the root ID held by this browser.
-      const rootBlobId = getStoredMemoryRoot();
-      const memoryUrl = rootBlobId
-        ? '/api/tatum/memory?rootBlobId=' + encodeURIComponent(rootBlobId)
-        : '/api/tatum/memory';
-      const memRes = await fetch(memoryUrl);
-      if (!memRes.ok) {
-        const memoryError = await memRes.json().catch(() => ({}));
-        throw new Error(memoryError.error || 'Unable to retrieve Walrus Testnet memory.');
+      // Read network configuration first so Testnet and Mainnet root pointers
+      // remain isolated in this browser.
+      const configRes = await fetch('/api/tatum/memory');
+      if (!configRes.ok) {
+        const configError = await configRes.json().catch(() => ({}));
+        throw new Error(configError.error || 'Unable to read Walrus configuration.');
       }
-      const mData = await memRes.json();
+      const configData = await configRes.json();
+      const configuredNetwork = configData.walrusConfig?.network || 'testnet';
+      const rootBlobId = getStoredMemoryRoot(configuredNetwork);
+      const memRes = rootBlobId
+        ? await fetch('/api/tatum/memory?rootBlobId=' + encodeURIComponent(rootBlobId))
+        : null;
+      if (memRes && !memRes.ok) {
+        const memoryError = await memRes.json().catch(() => ({}));
+        throw new Error(memoryError.error || 'Unable to retrieve Walrus memory.');
+      }
+      const mData = memRes ? await memRes.json() : configData;
       setMemoryStore({
         initialized: Boolean(mData.initialized),
         rootBlobId: mData.memoryStore?.rootBlobId || rootBlobId || null,
@@ -341,8 +351,8 @@ export function App() {
         body: JSON.stringify({})
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Walrus Testnet initialization failed');
-      storeMemoryRoot(data.rootBlobId);
+      if (!res.ok) throw new Error(data.error || 'Walrus memory initialization failed');
+      storeMemoryRoot(data.rootBlobId, data.network || memoryStore.network);
       setMemoryStore({
         initialized: true,
         rootBlobId: data.rootBlobId,
@@ -353,7 +363,7 @@ export function App() {
         ownerAddressConfigured: Boolean(data.ownerAddressConfigured)
       });
       await loadAllData(activeAddress, demoMode);
-      showToast(String(data.memoryCount) + ' demo memories published and read back from Walrus Testnet.');
+      showToast(String(data.memoryCount) + ' demo memories published and read back from Walrus ' + (data.network || memoryStore.network) + '.');
     } catch (err: any) {
       setApiError(err.message || 'Unable to initialize Walrus memory.');
     } finally {
@@ -375,8 +385,8 @@ export function App() {
 
   const handleTrustAddress = async (addressToTrust: string, name?: string, category?: string) => {
     try {
-      const rootBlobId = getStoredMemoryRoot();
-      if (!rootBlobId) throw new Error('Initialize Walrus Testnet memory before saving a trusted address.');
+      const rootBlobId = getStoredMemoryRoot(memoryStore.network);
+      if (!rootBlobId) throw new Error('Initialize Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'} memory before saving a trusted address.');
       const res = await fetch('/api/tatum/memory/trust', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -391,7 +401,7 @@ export function App() {
       if (!res.ok) throw new Error(data.error || 'Unable to save trusted address.');
       updateMemoryStoreFromResponse(data);
       setTrustedAddresses(data.trustedAddresses || []);
-      if (data.published) showToast('Trusted address published to Walrus Testnet.');
+      if (data.published) showToast('Trusted address published to Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'}.');
       else showToast('That address is already in your saved memory.');
     } catch (err: any) {
       setApiError(err.message || 'Unable to save trusted address.');
@@ -401,7 +411,7 @@ export function App() {
   const handleUntrustAddress = async (addressToUntrust: string) => {
     try {
       const rootBlobId = getStoredMemoryRoot();
-      if (!rootBlobId) throw new Error('Initialize Walrus Testnet memory before editing trusted addresses.');
+      if (!rootBlobId) throw new Error('Initialize Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'} memory before editing trusted addresses.');
       const res = await fetch('/api/tatum/memory/untrust', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -411,7 +421,7 @@ export function App() {
       if (!res.ok) throw new Error(data.error || 'Unable to remove trusted address.');
       updateMemoryStoreFromResponse(data);
       setTrustedAddresses(data.trustedAddresses || []);
-      if (data.published) showToast('Address removal published to Walrus Testnet.');
+      if (data.published) showToast('Address removal published to Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'}.');
     } catch (err: any) {
       setApiError(err.message || 'Unable to remove trusted address.');
     }
@@ -420,7 +430,7 @@ export function App() {
   const handleDismissAlert = async (alertId: string) => {
     try {
       const rootBlobId = getStoredMemoryRoot();
-      if (!rootBlobId) throw new Error('Initialize Walrus Testnet memory before recording alert decisions.');
+      if (!rootBlobId) throw new Error('Initialize Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'} memory before recording alert decisions.');
       const res = await fetch('/api/tatum/memory/dismiss-alert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -434,7 +444,7 @@ export function App() {
       if (!res.ok) throw new Error(data.error || 'Unable to record alert decision.');
       updateMemoryStoreFromResponse(data);
       setAlerts(prev => prev.filter(a => a.id !== alertId));
-      showToast('Alert decision published to Walrus Testnet.');
+      showToast('Alert decision published to Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'}.');
     } catch (err: any) {
       setApiError(err.message || 'Unable to record alert decision.');
     }
@@ -879,7 +889,7 @@ export function App() {
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-primary">Watchdog Watch Protocol</h3>
-                  <p className="text-xs text-tertiary">{memoryStore.initialized ? "Alerts scored against retrieved Walrus Testnet habits" : "Initialize Walrus memory to enable personalized habit checks"}</p>
+                  <p className="text-xs text-tertiary">{memoryStore.initialized ? "Alerts scored against retrieved Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'} habits" : "Initialize Walrus memory to enable personalized habit checks"}</p>
                 </div>
               </div>
 
@@ -1023,7 +1033,7 @@ export function App() {
                 </div>
               </div>
               <span className={memoryStore.initialized ? "inline-flex items-center gap-xs rounded-full border border-utility-success-200 bg-utility-success-50 px-md py-xxs text-xs font-medium text-utility-success-700" : "inline-flex items-center gap-xs rounded-full border border-utility-gray-200 bg-utility-gray-50 px-md py-xxs text-xs font-medium text-utility-gray-700"}>
-                {memoryStore.initialized ? "Walrus Testnet · " + memoryStore.memoryCount + " memories" : "Memory not initialized"}
+                {memoryStore.initialized ? "Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'} · " + memoryStore.memoryCount + " memories" : "Memory not initialized"}
               </span>
             </section>
 
@@ -1142,18 +1152,18 @@ export function App() {
                   </div>
                   <div>
                     <h3 className="text-sm font-semibold text-primary">Walrus Memory Store</h3>
-                    <p className="text-xs text-tertiary">Public memory records stored on Walrus Testnet</p>
+                    <p className="text-xs text-tertiary">Public memory records stored on Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'}</p>
                   </div>
                 </div>
                 <span className={memoryStore.initialized ? "inline-flex items-center gap-xs rounded-full border border-utility-success-200 bg-utility-success-50 px-md py-xxs text-xs font-medium text-utility-success-700" : "inline-flex items-center gap-xs rounded-full border border-utility-gray-200 bg-utility-gray-50 px-md py-xxs text-xs font-medium text-utility-gray-700"}>
-                  {memoryStore.initialized ? "Testnet · " + memoryStore.memoryCount + " memories" : "Not initialized"}
+                  {memoryStore.initialized ? (memoryStore.network === 'mainnet' ? 'Mainnet · ' : 'Testnet · ') + memoryStore.memoryCount + " memories" : "Not initialized"}
                 </span>
               </div>
 
               {!memoryStore.initialized && (
                 <div className="rounded-lg border border-utility-warning-200 bg-utility-warning-50 p-sm flex flex-col gap-sm">
                   <p className="text-xs text-secondary">
-                    No Walrus memory manifest is linked to this browser yet. Initialize 12 synthetic demo records on Walrus Testnet. Walrus blobs are public: do not upload private notes, secrets, or sensitive financial habits.
+                    No Walrus memory manifest is linked to this browser yet. Initialize 12 synthetic demo records on Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'}. Walrus blobs are public: do not upload private notes, secrets, or sensitive financial habits.
                   </p>
                   <button
                     type="button"
@@ -1162,13 +1172,13 @@ export function App() {
                     className="inline-flex items-center justify-center gap-sm rounded-lg bg-brand-solid px-lg py-sm text-sm font-semibold text-primary-on-brand shadow-xs hover:bg-brand-solid-hover focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50"
                   >
                     <Database className="size-4 shrink-0" />
-                    {memoryInitializing ? 'Publishing and verifying...' : 'Publish 12 demo memories to Walrus Testnet'}
+                    {memoryInitializing ? 'Publishing and verifying...' : 'Publish 12 demo memories to Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'}'}
                   </button>
                 </div>
               )}
               {memoryStore.initialized && (
                 <div className="rounded-lg border border-utility-success-200 bg-utility-success-50 p-sm">
-                  <p className="text-xs font-semibold text-secondary">Walrus Testnet manifest loaded</p>
+                  <p className="text-xs font-semibold text-secondary">Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'} manifest loaded</p>
                   <p className="text-xs text-tertiary mt-xxs">{memoryStore.memoryCount} memory records · {memoryStore.epochs} storage epochs</p>
                   <p className="text-xs text-tertiary mt-xxs break-all">Root blob: {memoryStore.rootBlobId}</p>
                   <p className="text-xs text-tertiary mt-xxs">This browser stores the root pointer locally. Save the ID before moving to another browser or device. Walrus blobs are public.</p>
@@ -1226,7 +1236,7 @@ export function App() {
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-sm font-semibold text-primary">Trusted Addresses</h4>
-                  <p className="text-xs text-tertiary">Trusted addresses you add are publicly retrievable from Walrus Testnet</p>
+                  <p className="text-xs text-tertiary">Trusted addresses you add are publicly retrievable from Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'}</p>
                 </div>
                 <span className="inline-flex items-center gap-xs rounded-full border border-utility-brand-200 bg-utility-brand-50 px-md py-xxs text-xs font-medium text-utility-brand-700">
                   {trustedAddresses.length} Registered
@@ -1412,21 +1422,21 @@ export function App() {
               <div>
                 <span className="text-tertiary text-xs block mb-xxs">Walrus Publisher Endpoint</span>
                 <div className="bg-secondary p-sm rounded-md border border-secondary font-mono text-xs text-secondary break-all">
-                  WALRUS_PUBLISHER_URL || https://publisher.walrus-testnet.walrus.space
+                  {memoryStore.network === 'mainnet' ? 'WALRUS_PUBLISHER_URL (private authenticated Mainnet publisher)' : 'WALRUS_PUBLISHER_URL || https://publisher.walrus-testnet.walrus.space'}
                 </div>
               </div>
 
               <div>
                 <span className="text-tertiary text-xs block mb-xxs">Walrus Aggregator Endpoint</span>
                 <div className="bg-secondary p-sm rounded-md border border-secondary font-mono text-xs text-secondary break-all">
-                  WALRUS_AGGREGATOR_URL || https://aggregator.walrus-testnet.walrus.space
+                  {memoryStore.network === 'mainnet' ? 'WALRUS_AGGREGATOR_URL || https://aggregator.walrus-mainnet.walrus.space' : 'WALRUS_AGGREGATOR_URL || https://aggregator.walrus-testnet.walrus.space'}
                 </div>
               </div>
 
               <div>
                 <span className="text-tertiary text-xs block mb-xxs">Walrus Memory Epoch</span>
                 <div className="bg-secondary p-sm rounded-md border border-secondary font-mono text-xs text-secondary break-all">
-                  {memoryStore.epochs} Testnet storage epochs
+                  {memoryStore.epochs} {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'} storage epochs
                 </div>
               </div>
             </div>
