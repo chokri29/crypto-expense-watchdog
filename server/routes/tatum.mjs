@@ -88,8 +88,8 @@ async function loadWalrusMemory(rootBlobId, readOptions = {}) {
 async function publishWalrusMemory(snapshot, previousManifest = null, events = []) {
   const memoryBlobIds = [...(previousManifest?.memoryBlobIds || [])]
   const newMemoryBlobIds = []
-  const publishOptions = { timeoutMs: 10000 }
-  const verificationOptions = { timeoutMs: 8000, retries: 1 }
+  const publishOptions = { timeoutMs: 8000 }
+  const verificationOptions = { timeoutMs: 6000, retries: 1 }
 
   // Walrus uploads are independent. Publish in bounded batches to avoid
   // serial network latency without overwhelming the public publisher.
