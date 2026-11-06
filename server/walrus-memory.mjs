@@ -13,9 +13,14 @@ function normalizeBaseUrl(value, fallback) {
 }
 
 export function getWalrusConfig() {
+  const publisherUrl = normalizeBaseUrl(process.env.WALRUS_PUBLISHER_URL, DEFAULT_PUBLISHER_URL)
+  const aggregatorUrl = normalizeBaseUrl(process.env.WALRUS_AGGREGATOR_URL, DEFAULT_AGGREGATOR_URL)
+  if (!new URL(publisherUrl).hostname.includes('testnet') || !new URL(aggregatorUrl).hostname.includes('testnet')) {
+    throw new Error('This hackathon build is restricted to Walrus Testnet endpoints')
+  }
   return {
-    publisherUrl: normalizeBaseUrl(process.env.WALRUS_PUBLISHER_URL, DEFAULT_PUBLISHER_URL),
-    aggregatorUrl: normalizeBaseUrl(process.env.WALRUS_AGGREGATOR_URL, DEFAULT_AGGREGATOR_URL),
+    publisherUrl,
+    aggregatorUrl,
     epochs: Math.max(1, Math.min(30, Number.parseInt(process.env.WALRUS_MEMORY_EPOCHS || '10', 10) || 10)),
     ownerAddress: process.env.WALRUS_SUI_OWNER_ADDRESS || process.env.SUI_WALLET_ADDRESS || '',
     network: 'testnet',
@@ -87,10 +92,13 @@ export async function readWalrusBytes(blobId) {
       const detail = (await response.text()).slice(0, 250)
       const retryable = response.status === 404 || response.status >= 500
       lastError = new Error(`Walrus aggregator returned HTTP ${response.status}: ${detail}`)
-      if (!retryable) throw lastError
+      if (!retryable) {
+        lastError.retryable = false
+        throw lastError
+      }
     } catch (error) {
       lastError = error
-      if (attempt === 4) break
+      if (error?.retryable === false || attempt === 4) break
     }
     await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)))
   }
