@@ -330,7 +330,7 @@ export function App() {
       const res = await fetch('/api/tatum/memory/seed', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress: activeAddress })
+        body: JSON.stringify({})
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Walrus Testnet initialization failed');
@@ -1143,7 +1143,7 @@ export function App() {
               {!memoryStore.initialized && (
                 <div className="rounded-lg border border-utility-warning-200 bg-utility-warning-50 p-sm flex flex-col gap-sm">
                   <p className="text-xs text-secondary">
-                    No Walrus memory manifest is linked to this browser yet. Initialize the demo set to publish 12 clearly labelled fixture records to Walrus Testnet.
+                    No Walrus memory manifest is linked to this browser yet. Initialize 12 synthetic demo records on Walrus Testnet. Walrus blobs are public: do not upload private notes, secrets, or sensitive financial habits.
                   </p>
                   <button
                     type="button"
@@ -1160,7 +1160,7 @@ export function App() {
                   <p className="text-xs font-semibold text-secondary">Walrus Testnet manifest loaded</p>
                   <p className="text-xs text-tertiary mt-xxs">{memoryStore.memoryCount} memory records · {memoryStore.epochs} storage epochs</p>
                   <p className="text-xs text-tertiary mt-xxs break-all">Root blob: {memoryStore.rootBlobId}</p>
-                  <p className="text-xs text-tertiary mt-xxs">{memoryStore.ownerAddressConfigured ? 'Sui owner address configured for blob objects.' : 'Publisher owns the blob objects; Sui owner address is not configured.'}</p>
+                  <p className="text-xs text-tertiary mt-xxs">{memoryStore.ownerAddressConfigured ? 'Sui owner address configured for blob objects.' : 'Publisher owns the blob objects; no Sui recipient address is configured.'}</p>
                 </div>
               )}
 
@@ -1214,7 +1214,7 @@ export function App() {
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-sm font-semibold text-primary">Trusted Addresses</h4>
-                  <p className="text-xs text-tertiary">Trusted peers are published to Walrus Testnet after initialization</p>
+                  <p className="text-xs text-tertiary">Trusted addresses you add are publicly retrievable from Walrus Testnet</p>
                 </div>
                 <span className="inline-flex items-center gap-xs rounded-full border border-utility-brand-200 bg-utility-brand-50 px-md py-xxs text-xs font-medium text-utility-brand-700">
                   {trustedAddresses.length} Registered
