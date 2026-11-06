@@ -386,7 +386,7 @@ export function App() {
   const handleTrustAddress = async (addressToTrust: string, name?: string, category?: string) => {
     try {
       const rootBlobId = getStoredMemoryRoot(memoryStore.network);
-      if (!rootBlobId) throw new Error('Initialize Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'} memory before saving a trusted address.');
+      if (!rootBlobId) throw new Error('Initialize Walrus memory before saving a trusted address.');
       const res = await fetch('/api/tatum/memory/trust', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -401,7 +401,7 @@ export function App() {
       if (!res.ok) throw new Error(data.error || 'Unable to save trusted address.');
       updateMemoryStoreFromResponse(data);
       setTrustedAddresses(data.trustedAddresses || []);
-      if (data.published) showToast('Trusted address published to Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'}.');
+      if (data.published) showToast('Trusted address published to Walrus memory.');
       else showToast('That address is already in your saved memory.');
     } catch (err: any) {
       setApiError(err.message || 'Unable to save trusted address.');
@@ -411,7 +411,7 @@ export function App() {
   const handleUntrustAddress = async (addressToUntrust: string) => {
     try {
       const rootBlobId = getStoredMemoryRoot();
-      if (!rootBlobId) throw new Error('Initialize Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'} memory before editing trusted addresses.');
+      if (!rootBlobId) throw new Error('Initialize Walrus memory before editing trusted addresses.');
       const res = await fetch('/api/tatum/memory/untrust', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -421,7 +421,7 @@ export function App() {
       if (!res.ok) throw new Error(data.error || 'Unable to remove trusted address.');
       updateMemoryStoreFromResponse(data);
       setTrustedAddresses(data.trustedAddresses || []);
-      if (data.published) showToast('Address removal published to Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'}.');
+      if (data.published) showToast('Address removal published to Walrus memory.');
     } catch (err: any) {
       setApiError(err.message || 'Unable to remove trusted address.');
     }
@@ -430,7 +430,7 @@ export function App() {
   const handleDismissAlert = async (alertId: string) => {
     try {
       const rootBlobId = getStoredMemoryRoot();
-      if (!rootBlobId) throw new Error('Initialize Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'} memory before recording alert decisions.');
+      if (!rootBlobId) throw new Error('Initialize Walrus memory before recording alert decisions.');
       const res = await fetch('/api/tatum/memory/dismiss-alert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -444,7 +444,7 @@ export function App() {
       if (!res.ok) throw new Error(data.error || 'Unable to record alert decision.');
       updateMemoryStoreFromResponse(data);
       setAlerts(prev => prev.filter(a => a.id !== alertId));
-      showToast('Alert decision published to Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'}.');
+      showToast('Alert decision published to Walrus memory.');
     } catch (err: any) {
       setApiError(err.message || 'Unable to record alert decision.');
     }
@@ -889,7 +889,7 @@ export function App() {
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-primary">Watchdog Watch Protocol</h3>
-                  <p className="text-xs text-tertiary">{memoryStore.initialized ? "Alerts scored against retrieved Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'} habits" : "Initialize Walrus memory to enable personalized habit checks"}</p>
+                  <p className="text-xs text-tertiary">{memoryStore.initialized ? `Alerts scored against retrieved Walrus ${memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'} habits` : 'Initialize Walrus memory to enable personalized habit checks'}</p>
                 </div>
               </div>
 
@@ -1033,7 +1033,7 @@ export function App() {
                 </div>
               </div>
               <span className={memoryStore.initialized ? "inline-flex items-center gap-xs rounded-full border border-utility-success-200 bg-utility-success-50 px-md py-xxs text-xs font-medium text-utility-success-700" : "inline-flex items-center gap-xs rounded-full border border-utility-gray-200 bg-utility-gray-50 px-md py-xxs text-xs font-medium text-utility-gray-700"}>
-                {memoryStore.initialized ? "Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'} · " + memoryStore.memoryCount + " memories" : "Memory not initialized"}
+                {memoryStore.initialized ? `Walrus ${memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'} · ${memoryStore.memoryCount} memories` : 'Memory not initialized'}
               </span>
             </section>
 
@@ -1172,7 +1172,7 @@ export function App() {
                     className="inline-flex items-center justify-center gap-sm rounded-lg bg-brand-solid px-lg py-sm text-sm font-semibold text-primary-on-brand shadow-xs hover:bg-brand-solid-hover focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50"
                   >
                     <Database className="size-4 shrink-0" />
-                    {memoryInitializing ? 'Publishing and verifying...' : 'Publish 12 demo memories to Walrus {memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'}'}
+                    {memoryInitializing ? 'Publishing and verifying...' : 'Publish 12 demo memories to Walrus ' + (memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet')}
                   </button>
                 </div>
               )}
