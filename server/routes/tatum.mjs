@@ -4,12 +4,12 @@ import { getWalrusConfig, publishWalrusJson, readWalrusJson, isValidWalrusBlobId
 
 const router = Router()
 
-// Walrus Testnet is the default for the hackathon demo. A custom endpoint may
-// be supplied through environment variables; the owner address is optional.
+// Walrus defaults to Testnet for backward compatibility. Mainnet is opt-in via
+// WALRUS_NETWORK=mainnet and requires a private authenticated publisher endpoint.
 const WALRUS_MEMORY_CONFIG = {
   get AGGREGATOR_URL() { return getWalrusConfig().aggregatorUrl },
   get PUBLISHER_URL() { return getWalrusConfig().publisherUrl },
-  get STORAGE_DURATION() { return `${getWalrusConfig().epochs} Testnet epochs` },
+  get STORAGE_DURATION() { const config = getWalrusConfig(); return `${config.epochs} ${config.network} epochs` },
   get IS_CONFIGURED() { return Boolean(getWalrusConfig().publisherUrl) },
   get OWNER_CONFIGURED() { return isValidSuiAddress(getWalrusConfig().ownerAddress) },
 }
@@ -38,7 +38,7 @@ async function loadWalrusMemory(rootBlobId) {
   if (
     manifest?.schemaVersion !== 1 ||
     manifest?.kind !== 'ledger-memory-manifest' ||
-    manifest?.network !== 'testnet' ||
+    manifest?.network !== getWalrusConfig().network ||
     !isValidWalrusBlobId(manifest.snapshotBlobId) ||
     !Array.isArray(manifest.memoryBlobIds) ||
     manifest.memoryBlobIds.length > 500 ||
@@ -52,7 +52,7 @@ async function loadWalrusMemory(rootBlobId) {
   if (
     snapshot?.schemaVersion !== 1 ||
     snapshot?.kind !== 'ledger-memory-snapshot' ||
-    snapshot?.network !== 'testnet' ||
+    snapshot?.network !== getWalrusConfig().network ||
     !snapshot.profile ||
     !Array.isArray(snapshot.trustedAddresses) ||
     !Array.isArray(snapshot.favoriteCounterparties) ||
@@ -72,7 +72,7 @@ async function publishWalrusMemory(snapshot, previousManifest = null, events = [
     const stored = await publishWalrusJson({
       schemaVersion: 1,
       kind: 'ledger-memory-record',
-      network: 'testnet',
+      network: getWalrusConfig().network,
       createdAt: Date.now(),
       ...event,
     })
@@ -83,7 +83,7 @@ async function publishWalrusMemory(snapshot, previousManifest = null, events = [
   const snapshotResult = await publishWalrusJson({
     schemaVersion: 1,
     kind: 'ledger-memory-snapshot',
-    network: 'testnet',
+    network: getWalrusConfig().network,
     updatedAt: Date.now(),
     ...snapshot,
   })
@@ -121,7 +121,7 @@ async function publishWalrusMemory(snapshot, previousManifest = null, events = [
   }
 }
 
-// Demo fixture defaults used only to initialize a first Walrus Testnet snapshot.
+// Demo fixture defaults used only to initialize a first Walrus memory snapshot.
 let userMemoryProfile = {
   walletAddress: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
   minUsualTransferEth: 0.05,
@@ -290,9 +290,11 @@ router.get('/status', async (_req, res) => {
         aggregatorUrl: WALRUS_MEMORY_CONFIG.AGGREGATOR_URL,
         publisherUrl: WALRUS_MEMORY_CONFIG.PUBLISHER_URL,
         storageDuration: WALRUS_MEMORY_CONFIG.STORAGE_DURATION,
-        network: 'testnet',
+        network: getWalrusConfig().network,
         epochs: getWalrusConfig().epochs,
-        ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED
+        ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED,
+        authenticatedPublisher: getWalrusConfig().authenticated,
+        publisherJwtConfigured: getWalrusConfig().jwtConfigured
       }
     })
   }
@@ -832,7 +834,7 @@ router.post('/watchdog/analyze', async (req, res) => {
       minUsualTransferEth: profile.minUsualTransferEth,
       maxUsualTransferEth: profile.maxUsualTransferEth,
       trustedCount: trustedAddresses.length,
-      storageStatus: 'Walrus Testnet verified by manifest read',
+      storageStatus: `Walrus ${getWalrusConfig().network} verified by manifest read`,
       memoryCount: stored.manifest.memoryCount,
     },
     alerts
@@ -1009,7 +1011,7 @@ router.post('/chat/ask', async (req, res) => {
     let answer = ''
 
     if (q.includes('fee') || q.includes('gas') || q.includes('overpay')) {
-      recalledMemories.push(`Monthly gas budget of ${profile.monthlyFeeBudgetEth} ETH, retrieved from Walrus Testnet.`)
+      recalledMemories.push(`Monthly gas budget of ${profile.monthlyFeeBudgetEth} ETH, retrieved from Walrus ${getWalrusConfig().network}.`)
       recalledMemories.push(`Historical average gas price remembered as ${profile.averageFeeGwei} Gwei.`)
       answer = `Your saved monthly gas budget is ${profile.monthlyFeeBudgetEth} ETH and your stored average gas baseline is ${profile.averageFeeGwei} Gwei. Compare these limits with the latest Tatum receipts before deciding whether fees were unusually high.`
     } else if (q.includes('flag') || q.includes('alert') || q.includes('unusual') || q.includes('warning')) {
