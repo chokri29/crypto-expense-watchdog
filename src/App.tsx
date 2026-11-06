@@ -917,7 +917,7 @@ export function App() {
               {alerts.length === 0 ? (
                 <section className="rounded-xl border border-secondary bg-primary p-xl text-center flex flex-col items-center justify-center gap-xs shadow-xs">
                   <ShieldCheck className="size-9 text-fg-success-primary" />
-                  <div className="text-sm font-semibold text-primary">Zero Anomalies Detected</div>
+                  <div className="text-sm font-semibold text-primary">{memoryStore.initialized ? "Zero Anomalies Detected" : "Memory Not Initialized"}</div>
                   <p className="text-xs text-tertiary max-w-xs">
                     No active flags. Initialize Walrus memory to enable personalized transfer and counterparty checks.
                   </p>
@@ -1142,7 +1142,7 @@ export function App() {
                   </div>
                   <div>
                     <h3 className="text-sm font-semibold text-primary">Walrus Memory Store</h3>
-                    <p className="text-xs text-tertiary">Decentralized user habits profile</p>
+                    <p className="text-xs text-tertiary">Public memory records stored on Walrus Testnet</p>
                   </div>
                 </div>
                 <span className={memoryStore.initialized ? "inline-flex items-center gap-xs rounded-full border border-utility-success-200 bg-utility-success-50 px-md py-xxs text-xs font-medium text-utility-success-700" : "inline-flex items-center gap-xs rounded-full border border-utility-gray-200 bg-utility-gray-50 px-md py-xxs text-xs font-medium text-utility-gray-700"}>
