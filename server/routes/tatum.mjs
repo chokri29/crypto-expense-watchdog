@@ -1,8 +1,28 @@
 import { Router } from 'express'
+import { timingSafeEqual } from 'node:crypto'
 import { tatumFetch, tatumRpc, MissingApiKeyError, tatumApiBase } from '../tatum-client.mjs'
 import { getWalrusConfig, publishWalrusJson, readWalrusJson, isValidWalrusBlobId, isValidSuiAddress } from '../walrus-memory.mjs'
 
 const router = Router()
+
+function requireWalrusWriteAuthorization(req, res, next) {
+  if (getWalrusConfig().network !== 'mainnet') return next()
+
+  const expected = process.env.WALRUS_MAINNET_ADMIN_TOKEN || ''
+  const supplied = req.get('x-walrus-admin-token') || ''
+  if (!expected) {
+    return res.status(503).json({ error: 'Mainnet writes are disabled: configure WALRUS_MAINNET_ADMIN_TOKEN on the backend first' })
+  }
+
+  const expectedBytes = Buffer.from(expected, 'utf8')
+  const suppliedBytes = Buffer.from(supplied, 'utf8')
+  const authorized = expectedBytes.length === suppliedBytes.length &&
+    timingSafeEqual(expectedBytes, suppliedBytes)
+  if (!authorized) {
+    return res.status(401).json({ error: 'Mainnet memory writes require the backend admin token; do not expose this token in the browser' })
+  }
+  return next()
+}
 
 // Walrus defaults to Testnet for backward compatibility. Mainnet is opt-in via
 // WALRUS_NETWORK=mainnet and requires a private authenticated publisher endpoint.
@@ -895,7 +915,7 @@ router.get('/memory', async (req, res) => {
 
 // First-run demo seed: 12 separate, explicitly labelled memory records. These
 // are demonstration fixtures, not claims about real transaction history.
-router.post('/memory/seed', async (req, res) => {
+router.post('/memory/seed', requireWalrusWriteAuthorization, async (req, res) => {
   const existingRoot = typeof req.body?.rootBlobId === 'string' ? req.body.rootBlobId : ''
   if (existingRoot) return res.status(409).json({ error: 'Memory is already initialized for this browser' })
 
@@ -931,7 +951,7 @@ router.post('/memory/seed', async (req, res) => {
   }
 })
 
-router.post('/memory/trust', async (req, res) => {
+router.post('/memory/trust', requireWalrusWriteAuthorization, async (req, res) => {
   const { address, name = 'Trusted Contact', category = 'Custom', rootBlobId } = req.body || {}
   if (typeof address !== 'string' || !/^0x[a-fA-F0-9]{40}$/.test(address.trim())) {
     return res.status(400).json({ error: 'A valid 20-byte EVM address is required' })
@@ -954,7 +974,7 @@ router.post('/memory/trust', async (req, res) => {
   }
 })
 
-router.post('/memory/untrust', async (req, res) => {
+router.post('/memory/untrust', requireWalrusWriteAuthorization, async (req, res) => {
   const { address, rootBlobId } = req.body || {}
   if (typeof address !== 'string' || !/^0x[a-fA-F0-9]{40}$/.test(address.trim())) {
     return res.status(400).json({ error: 'A valid 20-byte EVM address is required' })
@@ -976,7 +996,7 @@ router.post('/memory/untrust', async (req, res) => {
   }
 })
 
-router.post('/memory/dismiss-alert', async (req, res) => {
+router.post('/memory/dismiss-alert', requireWalrusWriteAuthorization, async (req, res) => {
   const { alertId, note, rootBlobId } = req.body || {}
   if (typeof alertId !== 'string' || !alertId.trim()) return res.status(400).json({ error: 'Alert ID is required' })
 
