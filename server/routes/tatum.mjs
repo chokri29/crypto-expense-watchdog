@@ -96,19 +96,18 @@ async function publishWalrusMemory(snapshot, previousManifest = null, events = [
   const batchSize = 6
   for (let offset = 0; offset < events.length; offset += batchSize) {
     const batch = events.slice(offset, offset + batchSize)
-    let storedBatch
-    try {
-      storedBatch = await Promise.all(batch.map((event) => publishWalrusJson({
-        schemaVersion: 1,
-        kind: 'ledger-memory-record',
-        network: getWalrusConfig().network,
-        createdAt: Date.now(),
-        ...event,
-      }, publishOptions)))
-    } catch (error) {
-      throw new Error(`Walrus record upload batch ${Math.floor(offset / batchSize) + 1} failed: ${error.message}`)
+    const batchResults = await Promise.allSettled(batch.map((event) => publishWalrusJson({
+      schemaVersion: 1,
+      kind: 'ledger-memory-record',
+      network: getWalrusConfig().network,
+      createdAt: Date.now(),
+      ...event,
+    }, publishOptions)))
+    const failedUpload = batchResults.find((result) => result.status === 'rejected')
+    if (failedUpload) {
+      throw new Error(`Walrus record upload batch ${Math.floor(offset / batchSize) + 1} failed: ${failedUpload.reason?.message || 'publisher request failed'}`)
     }
-    const batchBlobIds = storedBatch.map((stored) => stored.blobId)
+    const batchBlobIds = batchResults.map((result) => result.value.blobId)
     memoryBlobIds.push(...batchBlobIds)
     newMemoryBlobIds.push(...batchBlobIds)
   }
