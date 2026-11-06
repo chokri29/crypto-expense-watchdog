@@ -275,6 +275,9 @@ const apiFetch = async (
         const tData = await txRes.json();
         fetchedTxs = tData.transactions || [];
         setTransactions(fetchedTxs);
+        // Transaction history is the primary wallet view. Do not keep it hidden
+        // behind slower summary, memory, or watchdog requests.
+        setLoading(false);
       } else {
         const errJson = await txRes.json().catch(() => ({}));
         throw new Error(errJson.error || 'Failed to fetch transaction records from Tatum');
