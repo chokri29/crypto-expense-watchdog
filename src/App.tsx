@@ -270,21 +270,23 @@ export function App() {
         ? '/api/tatum/memory?rootBlobId=' + encodeURIComponent(rootBlobId)
         : '/api/tatum/memory';
       const memRes = await fetch(memoryUrl);
-      if (memRes.ok) {
-        const mData = await memRes.json();
-        setMemoryStore({
-          initialized: Boolean(mData.initialized),
-          rootBlobId: mData.memoryStore?.rootBlobId || rootBlobId || null,
-          memoryCount: Number(mData.memoryStore?.memoryCount) || 0,
-          blobIds: Array.isArray(mData.memoryStore?.blobIds) ? mData.memoryStore.blobIds : [],
-          network: mData.walrusConfig?.network || 'testnet',
-          epochs: Number(mData.walrusConfig?.epochs) || 10,
-          ownerAddressConfigured: Boolean(mData.walrusConfig?.ownerAddressConfigured)
-        });
-        if (mData.profile) setMemoryProfile(mData.profile);
-        setTrustedAddresses(Array.isArray(mData.trustedAddresses) ? mData.trustedAddresses : []);
-        setFavoriteCounterparties(Array.isArray(mData.favoriteCounterparties) ? mData.favoriteCounterparties : []);
+      if (!memRes.ok) {
+        const memoryError = await memRes.json().catch(() => ({}));
+        throw new Error(memoryError.error || 'Unable to retrieve Walrus Testnet memory.');
       }
+      const mData = await memRes.json();
+      setMemoryStore({
+        initialized: Boolean(mData.initialized),
+        rootBlobId: mData.memoryStore?.rootBlobId || rootBlobId || null,
+        memoryCount: Number(mData.memoryStore?.memoryCount) || 0,
+        blobIds: Array.isArray(mData.memoryStore?.blobIds) ? mData.memoryStore.blobIds : [],
+        network: mData.walrusConfig?.network || 'testnet',
+        epochs: Number(mData.walrusConfig?.epochs) || 10,
+        ownerAddressConfigured: Boolean(mData.walrusConfig?.ownerAddressConfigured)
+      });
+      if (mData.profile) setMemoryProfile(mData.profile);
+      setTrustedAddresses(Array.isArray(mData.trustedAddresses) ? mData.trustedAddresses : []);
+      setFavoriteCounterparties(Array.isArray(mData.favoriteCounterparties) ? mData.favoriteCounterparties : []);
 
       // 5. Watchdog analysis uses the same retrieved Walrus root.
       const watchRes = await fetch('/api/tatum/watchdog/analyze', {
@@ -299,6 +301,9 @@ export function App() {
       if (watchRes.ok) {
         const wData = await watchRes.json();
         setAlerts(wData.alerts || []);
+      } else if (rootBlobId) {
+        const watchdogError = await watchRes.json().catch(() => ({}));
+        throw new Error(watchdogError.error || 'Unable to analyze transactions against Walrus memory.');
       }
     } catch (err: any) {
       setApiError(err.message || 'Error communicating with Tatum API.');
