@@ -8,7 +8,9 @@ const MAX_BLOB_BYTES = 256 * 1024
 const JWT_TTL_SECONDS = 90
 
 function normalizeBaseUrl(value, fallback) {
-  const url = String(value || fallback).trim().replace(/\/+$/, '')
+  const raw = String(value || fallback || '').trim().replace(/\/+$/, '')
+  if (!raw) return ''
+  const url = raw
   const parsed = new URL(url)
   if (parsed.protocol !== 'https:') throw new Error('Walrus endpoints must use HTTPS')
   return url
@@ -61,7 +63,7 @@ export function getWalrusConfig() {
   const publisherUrl = normalizeBaseUrl(process.env.WALRUS_PUBLISHER_URL, publisherFallback)
   const aggregatorUrl = normalizeBaseUrl(process.env.WALRUS_AGGREGATOR_URL, aggregatorFallback)
 
-  const publisherHost = new URL(publisherUrl).hostname.toLowerCase()
+  const publisherHost = publisherUrl ? new URL(publisherUrl).hostname.toLowerCase() : ''
   const aggregatorHost = new URL(aggregatorUrl).hostname.toLowerCase()
   if (network === 'testnet' && (!publisherHost.includes('testnet') || !aggregatorHost.includes('testnet'))) {
     throw new Error('Walrus Testnet mode only accepts Testnet publisher and aggregator endpoints')
@@ -69,10 +71,6 @@ export function getWalrusConfig() {
   if (network === 'mainnet' && (publisherHost.includes('testnet') || aggregatorHost.includes('testnet'))) {
     throw new Error('Walrus Mainnet mode cannot use Testnet endpoints')
   }
-  if (network === 'mainnet' && !process.env.WALRUS_PUBLISHER_URL) {
-    throw new Error('WALRUS_PUBLISHER_URL must point to your privately operated authenticated Mainnet publisher')
-  }
-
   return {
     network,
     publisherUrl,
@@ -90,6 +88,7 @@ export function isValidSuiAddress(address) {
 
 export async function publishWalrusJson(value) {
   const config = getWalrusConfig()
+  if (!config.publisherUrl) throw new Error('WALRUS_PUBLISHER_URL must point to your privately operated authenticated Mainnet publisher')
   const body = JSON.stringify(value)
   const bodySize = Buffer.byteLength(body, 'utf8')
   if (bodySize > MAX_BLOB_BYTES) {
