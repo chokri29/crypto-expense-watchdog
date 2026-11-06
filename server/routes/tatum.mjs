@@ -91,7 +91,7 @@ async function publishWalrusMemory(snapshot, previousManifest = null, events = [
   const manifestResult = await publishWalrusJson({
     schemaVersion: 1,
     kind: 'ledger-memory-manifest',
-    network: 'testnet',
+    network: getWalrusConfig().network,
     createdAt: previousManifest?.createdAt || Date.now(),
     updatedAt: Date.now(),
     memoryCount: memoryBlobIds.length,
@@ -116,7 +116,7 @@ async function publishWalrusMemory(snapshot, previousManifest = null, events = [
     snapshotBlobId: snapshotResult.blobId,
     memoryBlobIds,
     memoryCount: memoryBlobIds.length,
-    network: 'testnet',
+    network: getWalrusConfig().network,
     updatedAt: Date.now(),
   }
 }
@@ -310,9 +310,11 @@ router.get('/status', async (_req, res) => {
         aggregatorUrl: WALRUS_MEMORY_CONFIG.AGGREGATOR_URL,
         publisherUrl: WALRUS_MEMORY_CONFIG.PUBLISHER_URL,
         epochId: WALRUS_MEMORY_CONFIG.MEMORY_EPOCH_ID,
-        network: 'testnet',
+        network: getWalrusConfig().network,
         epochs: getWalrusConfig().epochs,
-        ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED
+        ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED,
+        authenticatedPublisher: getWalrusConfig().authenticated,
+        publisherJwtConfigured: getWalrusConfig().jwtConfigured
       }
     })
   } catch (error) {
@@ -849,7 +851,7 @@ router.get('/memory', async (req, res) => {
   const walrusConfig = {
     aggregatorUrl: config.aggregatorUrl,
     publisherUrl: config.publisherUrl,
-    network: 'testnet',
+    network: getWalrusConfig().network,
     epochs: config.epochs,
     ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED,
   }
@@ -915,7 +917,7 @@ router.post('/memory/seed', async (req, res) => {
       success: true,
       published: true,
       initialized: true,
-      network: 'testnet',
+      network: getWalrusConfig().network,
       rootBlobId: published.rootBlobId,
       snapshotBlobId: published.snapshotBlobId,
       memoryCount: published.memoryCount,
@@ -1016,7 +1018,7 @@ router.post('/chat/ask', async (req, res) => {
       answer = `Your saved monthly gas budget is ${profile.monthlyFeeBudgetEth} ETH and your stored average gas baseline is ${profile.averageFeeGwei} Gwei. Compare these limits with the latest Tatum receipts before deciding whether fees were unusually high.`
     } else if (q.includes('flag') || q.includes('alert') || q.includes('unusual') || q.includes('warning')) {
       recalledMemories.push(`Saved habitual transfer range: ${profile.minUsualTransferEth} to ${profile.maxUsualTransferEth} ETH.`)
-      recalledMemories.push(`${trustedAddresses.length} trusted addresses retrieved from Walrus Testnet.`)
+      recalledMemories.push(`${trustedAddresses.length} trusted addresses retrieved from Walrus ${getWalrusConfig().network}.`)
       recalledMemories.push(`${stored.snapshot.pastAlertNotes.length} stored alert notes.`)
       answer = `The watchdog compares transfers with your saved ${profile.maxUsualTransferEth} ETH customary ceiling and checks counterparties against your ${trustedAddresses.length} stored trusted addresses.`
     } else if (q.includes('who is') || q.includes('address') || q.includes('counterparty') || q.includes('0x')) {
@@ -1034,7 +1036,7 @@ router.post('/chat/ask', async (req, res) => {
       answer = `Your retrieved memory profile contains ${trustedAddresses.length} trusted counterparties and a customary transfer range of ${profile.minUsualTransferEth} – ${profile.maxUsualTransferEth} ETH.`
     }
 
-    return res.json({ answer, recalledMemories, timestamp: Date.now(), network: 'testnet', memoryCount: stored.manifest.memoryCount })
+    return res.json({ answer, recalledMemories, timestamp: Date.now(), network: getWalrusConfig().network, memoryCount: stored.manifest.memoryCount })
   } catch (error) {
     return res.status(502).json({ error: `Unable to retrieve Walrus memory for chat: ${error.message}` })
   }
