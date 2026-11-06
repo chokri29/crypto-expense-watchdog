@@ -1,121 +1,147 @@
 import { Router } from 'express'
+import { timingSafeEqual } from 'node:crypto'
 import { tatumFetch, tatumRpc, MissingApiKeyError, tatumApiBase } from '../tatum-client.mjs'
+import { getWalrusConfig, publishWalrusJson, readWalrusJson, isValidWalrusBlobId, isValidSuiAddress } from '../walrus-memory.mjs'
 
 const router = Router()
 
-// =========================================================================
-// WALRUS MEMORY INTEGRATION CONFIG & PLACEHOLDERS
-// =========================================================================
-// Sui wallet that will own / receive Walrus blob objects once Mainnet writes are enabled.
-// User will fund this address later. Server cannot sign without the private key.
-export const SUI_MEMORY_OWNER = process.env.SUI_MEMORY_OWNER || '0x66ef4fe9c04d9da0f1645d7255774aed557d27ebc2c59da1049c6757ee9cec65'
+function requireWalrusWriteAuthorization(req, res, next) {
+  if (getWalrusConfig().network !== 'mainnet') return next()
 
-export const WALRUS_MEMORY_CONFIG = {
-  // Prefer Mainnet publisher when WALRUS_PUBLISHER_URL is set.
-  // Defaults point at public testnet publisher so local/demo still works.
-  // Mainnet has NO public free publisher — use testnet until SUI_MEMORY_OWNER is funded
-  // and a Mainnet write path (private publisher / upload relay + signer) is configured.
-  AGGREGATOR_URL: process.env.WALRUS_AGGREGATOR_URL || 'https://aggregator.walrus-testnet.walrus.space',
-  PUBLISHER_URL: process.env.WALRUS_PUBLISHER_URL || 'https://publisher.walrus-testnet.walrus.space',
-  MAINNET_AGGREGATOR_URL: process.env.WALRUS_MAINNET_AGGREGATOR_URL || 'https://aggregator.walrus-mainnet.walrus.space',
-  MEMORY_EPOCH_ID: process.env.WALRUS_MEMORY_EPOCH_ID || 'epoch-walrus-alpha-watchdog-v1',
-  IS_CONFIGURED: Boolean(process.env.WALRUS_PUBLISHER_URL),
-  IS_MAINNET: Boolean(process.env.WALRUS_PUBLISHER_URL && !String(process.env.WALRUS_PUBLISHER_URL).includes('testnet'))
+  const expected = process.env.WALRUS_MAINNET_ADMIN_TOKEN || ''
+  const supplied = req.get('x-walrus-admin-token') || ''
+  if (!expected) {
+    return res.status(503).json({ error: 'Mainnet writes are disabled: configure WALRUS_MAINNET_ADMIN_TOKEN on the backend first' })
+  }
+
+  const expectedBytes = Buffer.from(expected, 'utf8')
+  const suppliedBytes = Buffer.from(supplied, 'utf8')
+  const authorized = expectedBytes.length === suppliedBytes.length &&
+    timingSafeEqual(expectedBytes, suppliedBytes)
+  if (!authorized) {
+    return res.status(401).json({ error: 'Mainnet memory writes require the backend admin token; do not expose this token in the browser' })
+  }
+  return next()
 }
 
-// Persist at least 10 memories (hackathon requirement). Each write attempts
-// a real HTTP PUT to the Walrus publisher and stores the returned blob id.
-const storedMemories = []
+// Walrus defaults to Testnet for backward compatibility. Mainnet is opt-in via
+// WALRUS_NETWORK=mainnet and requires a private authenticated publisher endpoint.
+const WALRUS_MEMORY_CONFIG = {
+  get AGGREGATOR_URL() { return getWalrusConfig().aggregatorUrl },
+  get PUBLISHER_URL() { return getWalrusConfig().publisherUrl },
+  get STORAGE_DURATION() { const config = getWalrusConfig(); return `${config.epochs} ${config.network} epochs` },
+  get IS_CONFIGURED() { return Boolean(getWalrusConfig().publisherUrl) },
+  get OWNER_CONFIGURED() { return isValidSuiAddress(getWalrusConfig().ownerAddress) },
+}
 
-async function publishToWalrus(content, label) {
-  const payload = typeof content === 'string'
-    ? { text: content, owner: SUI_MEMORY_OWNER, app: 'Ledger Memory' }
-    : { ...content, owner: content.owner || SUI_MEMORY_OWNER, app: content.app || 'Ledger Memory' }
-  const body = JSON.stringify(payload)
-  const publisher = WALRUS_MEMORY_CONFIG.PUBLISHER_URL.replace(/\/+$/, '')
-  const epochs = process.env.WALRUS_EPOCHS || '5'
-  // send_object_to assigns the resulting Blob object to the funded Sui address when supported
-  const qs = new URLSearchParams({ epochs, send_object_to: SUI_MEMORY_OWNER })
-  try {
-    const res = await fetch(`${publisher}/v1/blobs?${qs.toString()}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body,
-      signal: AbortSignal.timeout(20000)
-    })
-    const text = await res.text()
-    let parsed = null
-    try { parsed = JSON.parse(text) } catch (_) {}
-    const blobId =
-      parsed?.newlyCreated?.blobObject?.blobId ||
-      parsed?.alreadyCertified?.blobId ||
-      parsed?.blobId ||
-      null
-    return {
-      ok: res.ok,
-      status: res.status,
-      blobId,
-      raw: parsed || text.slice(0, 200),
-      label,
-      content: typeof content === 'string' ? content : content.text || JSON.stringify(content),
-      createdAt: Date.now(),
-      network: WALRUS_MEMORY_CONFIG.IS_MAINNET ? 'mainnet' : 'testnet'
-    }
-  } catch (err) {
-    return {
-      ok: false,
-      status: 0,
-      blobId: null,
-      error: err.message,
-      label,
-      content: typeof content === 'string' ? content : JSON.stringify(content),
-      createdAt: Date.now(),
-      network: WALRUS_MEMORY_CONFIG.IS_MAINNET ? 'mainnet' : 'testnet'
-    }
+function createDefaultMemoryState(walletAddress = userMemoryProfile.walletAddress) {
+  return {
+    profile: {
+      walletAddress,
+      minUsualTransferEth: userMemoryProfile.minUsualTransferEth,
+      maxUsualTransferEth: userMemoryProfile.maxUsualTransferEth,
+      monthlyFeeBudgetEth: userMemoryProfile.monthlyFeeBudgetEth,
+      averageFeeGwei: userMemoryProfile.averageFeeGwei,
+    },
+    trustedAddresses: userMemoryProfile.trustedAddresses.map((item) => ({ ...item })),
+    favoriteCounterparties: userMemoryProfile.favoriteCounterparties.map((item) => ({ ...item })),
+    dismissedAlertIds: [],
+    pastAlertNotes: userMemoryProfile.pastAlertNotes.map((item) => ({ ...item })),
   }
 }
 
-async function seedDefaultMemories(force = false) {
-  if (!force && storedMemories.length >= 10) return storedMemories
-  const seeds = [
-    { type: 'transfer_range', text: 'Usual outgoing transfer size is 0.05 – 0.65 ETH (avg 0.28 ETH)' },
-    { type: 'gas_habit', text: 'Average gas price observed: 24 Gwei. Monthly fee budget: 0.045 ETH' },
-    { type: 'trusted_counterparty', text: 'Trusted: Binance Hot Deposit (0x28c6…1d60) – Exchange' },
-    { type: 'trusted_counterparty', text: 'Trusted: Uniswap V2 Router (0x7a25…488d) – DeFi' },
-    { type: 'trusted_counterparty', text: 'Trusted: Primary Safe / Cold wallet (self)' },
-    { type: 'category_preference', text: 'Primary spending categories: Transfers and DeFi/DEX' },
-    { type: 'daily_volume', text: 'Usual daily outgoing volume ≈ 0.12 ETH' },
-    { type: 'frequent_peer', text: 'Most frequent counterparty: Uniswap V2 Router (18 interactions, 14.2 ETH)' },
-    { type: 'frequent_peer', text: 'Frequent counterparty: Binance Deposit (12 interactions, 8.5 ETH)' },
-    { type: 'baseline', text: '30-day baseline established. All future alerts scored against this profile.' },
-    { type: 'fee_cap', text: 'Monthly fee budget remembered as 0.045 ETH. Flag if exceeded.' },
-    { type: 'anomaly_policy', text: 'Flag transfers > 3× maxUsualTransferEth as High severity' }
-  ]
-  for (const s of seeds) {
-    if (storedMemories.some(m => m.type === s.type && m.content === s.text)) continue
-    const result = await publishToWalrus({
-      app: 'Ledger Memory',
-      epoch: WALRUS_MEMORY_CONFIG.MEMORY_EPOCH_ID,
-      type: s.type,
-      text: s.text,
-      wallet: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
-      ts: Date.now()
-    }, s.type)
-    storedMemories.push({
-      id: `mem-${String(storedMemories.length + 1).padStart(2, '0')}`,
-      type: s.type,
-      content: s.text,
-      blobId: result.blobId,
-      published: result.ok,
-      network: result.network,
-      createdAt: result.createdAt,
-      error: result.error || null
-    })
+async function loadWalrusMemory(rootBlobId) {
+  if (!rootBlobId) return null
+  if (!isValidWalrusBlobId(rootBlobId)) throw new Error('Invalid Walrus memory root blob ID')
+
+  const manifest = await readWalrusJson(rootBlobId)
+  if (
+    manifest?.schemaVersion !== 1 ||
+    manifest?.kind !== 'ledger-memory-manifest' ||
+    manifest?.network !== getWalrusConfig().network ||
+    !isValidWalrusBlobId(manifest.snapshotBlobId) ||
+    !Array.isArray(manifest.memoryBlobIds) ||
+    manifest.memoryBlobIds.length > 500 ||
+    manifest.memoryCount !== manifest.memoryBlobIds.length ||
+    manifest.memoryBlobIds.some((blobId) => !isValidWalrusBlobId(blobId))
+  ) {
+    throw new Error('Walrus memory manifest is invalid or unsupported')
   }
-  return storedMemories
+
+  const snapshot = await readWalrusJson(manifest.snapshotBlobId)
+  if (
+    snapshot?.schemaVersion !== 1 ||
+    snapshot?.kind !== 'ledger-memory-snapshot' ||
+    snapshot?.network !== getWalrusConfig().network ||
+    !snapshot.profile ||
+    !Array.isArray(snapshot.trustedAddresses) ||
+    !Array.isArray(snapshot.favoriteCounterparties) ||
+    !Array.isArray(snapshot.dismissedAlertIds) ||
+    !Array.isArray(snapshot.pastAlertNotes)
+  ) {
+    throw new Error('Walrus memory snapshot is invalid or incomplete')
+  }
+
+  return { manifest, snapshot }
 }
 
-// User Profile Baseline Memory (Stored in Walrus / cached in session)
+async function publishWalrusMemory(snapshot, previousManifest = null, events = []) {
+  const memoryBlobIds = [...(previousManifest?.memoryBlobIds || [])]
+  const newMemoryBlobIds = []
+  for (const event of events) {
+    const stored = await publishWalrusJson({
+      schemaVersion: 1,
+      kind: 'ledger-memory-record',
+      network: getWalrusConfig().network,
+      createdAt: Date.now(),
+      ...event,
+    })
+    memoryBlobIds.push(stored.blobId)
+    newMemoryBlobIds.push(stored.blobId)
+  }
+
+  const snapshotResult = await publishWalrusJson({
+    schemaVersion: 1,
+    kind: 'ledger-memory-snapshot',
+    network: getWalrusConfig().network,
+    updatedAt: Date.now(),
+    ...snapshot,
+  })
+
+  const manifestResult = await publishWalrusJson({
+    schemaVersion: 1,
+    kind: 'ledger-memory-manifest',
+    network: getWalrusConfig().network,
+    createdAt: previousManifest?.createdAt || Date.now(),
+    updatedAt: Date.now(),
+    memoryCount: memoryBlobIds.length,
+    storageEpochs: getWalrusConfig().epochs,
+    memoryBlobIds,
+    snapshotBlobId: snapshotResult.blobId,
+  })
+
+  // A successful publisher response is not enough: verify that the manifest,
+  // snapshot, and every individual memory record can be read back via Walrus.
+  const verified = await loadWalrusMemory(manifestResult.blobId)
+  if (!verified || verified.manifest.memoryCount !== memoryBlobIds.length) {
+    throw new Error('Walrus manifest readback did not match the published memory count')
+  }
+  const verifiedRecords = await Promise.all(newMemoryBlobIds.map((blobId) => readWalrusJson(blobId)))
+  if (verifiedRecords.some((record) => record?.schemaVersion !== 1 || record?.kind !== 'ledger-memory-record')) {
+    throw new Error('One or more Walrus memory records failed readback validation')
+  }
+
+  return {
+    rootBlobId: manifestResult.blobId,
+    snapshotBlobId: snapshotResult.blobId,
+    memoryBlobIds,
+    memoryCount: memoryBlobIds.length,
+    network: getWalrusConfig().network,
+    updatedAt: Date.now(),
+  }
+}
+
+// Demo fixture defaults used only to initialize a first Walrus memory snapshot.
 let userMemoryProfile = {
   walletAddress: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
   minUsualTransferEth: 0.05,
@@ -283,7 +309,12 @@ router.get('/status', async (_req, res) => {
       walrusConfig: {
         aggregatorUrl: WALRUS_MEMORY_CONFIG.AGGREGATOR_URL,
         publisherUrl: WALRUS_MEMORY_CONFIG.PUBLISHER_URL,
-        epochId: WALRUS_MEMORY_CONFIG.MEMORY_EPOCH_ID
+        storageDuration: WALRUS_MEMORY_CONFIG.STORAGE_DURATION,
+        network: getWalrusConfig().network,
+        epochs: getWalrusConfig().epochs,
+        ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED,
+        authenticatedPublisher: getWalrusConfig().authenticated,
+        publisherJwtConfigured: getWalrusConfig().jwtConfigured
       }
     })
   }
@@ -298,7 +329,12 @@ router.get('/status', async (_req, res) => {
       walrusConfig: {
         aggregatorUrl: WALRUS_MEMORY_CONFIG.AGGREGATOR_URL,
         publisherUrl: WALRUS_MEMORY_CONFIG.PUBLISHER_URL,
-        epochId: WALRUS_MEMORY_CONFIG.MEMORY_EPOCH_ID
+        epochId: WALRUS_MEMORY_CONFIG.MEMORY_EPOCH_ID,
+        network: getWalrusConfig().network,
+        epochs: getWalrusConfig().epochs,
+        ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED,
+        authenticatedPublisher: getWalrusConfig().authenticated,
+        publisherJwtConfigured: getWalrusConfig().jwtConfigured
       }
     })
   } catch (error) {
@@ -726,10 +762,27 @@ router.get('/wallet/summary', async (req, res) => {
   })
 })
 
-// Walrus Memory Watchdog Analysis Endpoint
+// Walrus-backed Watchdog Analysis Endpoint
 router.post('/watchdog/analyze', async (req, res) => {
-  const { address, transactions = [] } = req.body
+  const { address, transactions = [], rootBlobId } = req.body
+  let stored
+  try {
+    stored = await loadWalrusMemory(rootBlobId)
+  } catch (error) {
+    return res.status(502).json({ error: error.message, memoryInitialized: Boolean(rootBlobId) })
+  }
 
+  if (!stored) {
+    return res.json({
+      memoryInitialized: false,
+      memoryProfile: { storageStatus: 'Not initialized', trustedCount: 0 },
+      alerts: [],
+    })
+  }
+
+  const profile = stored.snapshot.profile
+  const trustedAddresses = stored.snapshot.trustedAddresses
+  const dismissedAlertIds = new Set(stored.snapshot.dismissedAlertIds)
   const alerts = []
   const seenPayments = new Map()
 
@@ -738,26 +791,21 @@ router.post('/watchdog/analyze', async (req, res) => {
     if (tx.type !== 'outgoing') continue
 
     const recipient = (tx.to || '').toLowerCase()
-    const amountEth = tx.numericEth || 0
+    const amountEth = Number(tx.numericEth) || 0
     const txTime = tx.timestamp || Date.now()
     const alertId = `alert-${tx.hash || i}`
 
-    if (userMemoryProfile.dismissedAlertIds.has(alertId)) {
-      continue
-    }
-
-    const trustedMatch = userMemoryProfile.trustedAddresses.find(
+    const trustedMatch = trustedAddresses.find(
       (item) => item.address.toLowerCase() === recipient
     )
 
-    // 1. Unusually large transfer rule
-    if (amountEth > userMemoryProfile.maxUsualTransferEth) {
+    if (amountEth > profile.maxUsualTransferEth && !dismissedAlertIds.has(`${alertId}-vol`)) {
       alerts.push({
         id: `${alertId}-vol`,
         txHash: tx.hash,
         rule: 'large_amount',
-        severity: amountEth > (userMemoryProfile.maxUsualTransferEth * 3) ? 'high' : 'medium',
-        reason: `Transfer of ${amountEth} ${tx.tokenSymbol || 'ETH'} exceeds your usual transfer cap of ${userMemoryProfile.maxUsualTransferEth} ETH.`,
+        severity: amountEth > (profile.maxUsualTransferEth * 3) ? 'high' : 'medium',
+        reason: `Transfer of ${amountEth} ${tx.tokenSymbol || 'ETH'} exceeds your saved transfer cap of ${profile.maxUsualTransferEth} ETH.`,
         amount: tx.valueDisplay || String(amountEth),
         token: tx.tokenSymbol || 'ETH',
         counterparty: tx.to,
@@ -766,9 +814,8 @@ router.post('/watchdog/analyze', async (req, res) => {
       })
     }
 
-    // 2. Duplicate payment rule
     const paymentKey = `${recipient}:${amountEth.toFixed(4)}`
-    if (seenPayments.has(paymentKey) && amountEth > 0) {
+    if (seenPayments.has(paymentKey) && amountEth > 0 && !dismissedAlertIds.has(`${alertId}-dup`)) {
       const prevTime = seenPayments.get(paymentKey)
       const diffMinutes = Math.round(Math.abs(txTime - prevTime) / (60 * 1000))
       alerts.push({
@@ -787,14 +834,13 @@ router.post('/watchdog/analyze', async (req, res) => {
       seenPayments.set(paymentKey, txTime)
     }
 
-    // 3. New counterparty rule
-    if (!trustedMatch && recipient && recipient !== 'n/a' && recipient !== '0x0000000000000000000000000000000000000000') {
+    if (!dismissedAlertIds.has(`${alertId}-new`) && !trustedMatch && recipient && recipient !== 'n/a' && recipient !== '0x0000000000000000000000000000000000000000') {
       alerts.push({
         id: `${alertId}-new`,
         txHash: tx.hash,
         rule: 'new_address',
         severity: 'low',
-        reason: `First transfer to counterparty ${tx.to.slice(0, 6)}...${tx.to.slice(-4)}, not yet recorded in your Walrus trusted memory.`,
+        reason: `First transfer to counterparty ${tx.to.slice(0, 6)}...${tx.to.slice(-4)}, not yet recorded in your saved trusted-address memory.`,
         amount: tx.valueDisplay || String(amountEth),
         token: tx.tokenSymbol || 'ETH',
         counterparty: tx.to,
@@ -805,177 +851,215 @@ router.post('/watchdog/analyze', async (req, res) => {
   }
 
   res.json({
+    memoryInitialized: true,
     memoryProfile: {
-      minUsualTransferEth: userMemoryProfile.minUsualTransferEth,
-      maxUsualTransferEth: userMemoryProfile.maxUsualTransferEth,
-      trustedCount: userMemoryProfile.trustedAddresses.length,
-      storageStatus: WALRUS_MEMORY_CONFIG.IS_CONFIGURED ? 'Walrus Connected' : 'Walrus Memory Active'
+      minUsualTransferEth: profile.minUsualTransferEth,
+      maxUsualTransferEth: profile.maxUsualTransferEth,
+      trustedCount: trustedAddresses.length,
+      storageStatus: `Walrus ${getWalrusConfig().network} verified by manifest read`,
+      memoryCount: stored.manifest.memoryCount,
     },
     alerts
   })
 })
 
-// Memory endpoints
-router.get('/memory', async (_req, res) => {
-  // Ensure we always expose ≥10 memories (seed on first read if needed)
-  if (storedMemories.length < 10) {
-    try { await seedDefaultMemories() } catch (_) {}
+// Read the root manifest and latest snapshot from Walrus. The browser stores
+// the root blob ID so this works across serverless invocations and restarts.
+router.get('/memory', async (req, res) => {
+  const config = getWalrusConfig()
+  const rootBlobId = typeof req.query.rootBlobId === 'string' ? req.query.rootBlobId : ''
+  const walrusConfig = {
+    aggregatorUrl: config.aggregatorUrl,
+    publisherUrl: config.publisherUrl,
+    network: getWalrusConfig().network,
+    epochs: config.epochs,
+    ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED,
   }
-  const publishedCount = storedMemories.filter(m => m.published && m.blobId).length
-  res.json({
-    profile: {
-      walletAddress: userMemoryProfile.walletAddress,
-      minUsualTransferEth: userMemoryProfile.minUsualTransferEth,
-      maxUsualTransferEth: userMemoryProfile.maxUsualTransferEth,
-      monthlyFeeBudgetEth: userMemoryProfile.monthlyFeeBudgetEth,
-      averageFeeGwei: userMemoryProfile.averageFeeGwei,
-      baselineEstablished: true,
-      baselinePeriodDays: 30
-    },
-    memories: storedMemories,
-    memoryCount: storedMemories.length,
-    publishedCount,
-    meetsRequirement: storedMemories.length >= 10,
-    trustedAddresses: userMemoryProfile.trustedAddresses,
-    favoriteCounterparties: userMemoryProfile.favoriteCounterparties,
-    dismissedCount: userMemoryProfile.dismissedAlertIds.size,
-    pastAlertNotes: userMemoryProfile.pastAlertNotes,
-    walrusConfig: {
-      aggregatorUrl: WALRUS_MEMORY_CONFIG.AGGREGATOR_URL,
-      publisherUrl: WALRUS_MEMORY_CONFIG.PUBLISHER_URL,
-      mainnetAggregatorUrl: WALRUS_MEMORY_CONFIG.MAINNET_AGGREGATOR_URL,
-      epochId: WALRUS_MEMORY_CONFIG.MEMORY_EPOCH_ID,
-      isMainnet: WALRUS_MEMORY_CONFIG.IS_MAINNET,
-      suiOwner: SUI_MEMORY_OWNER,
-      status: publishedCount >= 10
-        ? (WALRUS_MEMORY_CONFIG.IS_MAINNET ? 'Walrus Mainnet – ≥10 blobs stored' : 'Walrus Testnet – ≥10 blobs stored')
-        : (WALRUS_MEMORY_CONFIG.IS_MAINNET ? 'Walrus Mainnet connected' : 'Walrus publisher active')
-    }
-  })
-})
 
-// Force (re)seed + publish memories to Walrus (for judges / setup)
-router.post('/memory/seed', async (_req, res) => {
+  if (!rootBlobId) {
+    return res.json({
+      initialized: false,
+      profile: null,
+      trustedAddresses: [],
+      favoriteCounterparties: [],
+      dismissedCount: 0,
+      pastAlertNotes: [],
+      memoryStore: { rootBlobId: null, memoryCount: 0, blobIds: [] },
+      walrusConfig,
+    })
+  }
+
   try {
-    const list = await seedDefaultMemories(true)
-    const publishedCount = list.filter(m => m.published && m.blobId).length
-    res.json({
+    const stored = await loadWalrusMemory(rootBlobId)
+    if (!stored) return res.status(404).json({ error: 'Walrus memory root was not found' })
+    return res.json({
+      initialized: true,
+      profile: stored.snapshot.profile,
+      trustedAddresses: stored.snapshot.trustedAddresses,
+      favoriteCounterparties: stored.snapshot.favoriteCounterparties,
+      dismissedCount: stored.snapshot.dismissedAlertIds.length,
+      pastAlertNotes: stored.snapshot.pastAlertNotes,
+      memoryStore: {
+        rootBlobId,
+        snapshotBlobId: stored.manifest.snapshotBlobId,
+        memoryCount: stored.manifest.memoryCount,
+        blobIds: stored.manifest.memoryBlobIds,
+        updatedAt: stored.manifest.updatedAt,
+      },
+      walrusConfig,
+    })
+  } catch (error) {
+    return res.status(502).json({ error: `Unable to retrieve Walrus memory: ${error.message}` })
+  }
+})
+
+// First-run demo seed: 12 separate, explicitly labelled memory records. These
+// are demonstration fixtures, not claims about real transaction history.
+router.post('/memory/seed', requireWalrusWriteAuthorization, async (req, res) => {
+  const existingRoot = typeof req.body?.rootBlobId === 'string' ? req.body.rootBlobId : ''
+  if (existingRoot) return res.status(409).json({ error: 'Memory is already initialized for this browser' })
+
+  // Keep the seed independent of the visitor's active wallet. These are
+  // synthetic demo fixtures, not a user's actual financial profile.
+  const snapshot = createDefaultMemoryState(userMemoryProfile.walletAddress)
+  const events = [
+    { memoryType: 'demo_profile', label: 'Demo wallet profile initialized', value: snapshot.walletAddress, source: 'demo_fixture' },
+    { memoryType: 'demo_habits', label: 'Customary transfer range', value: { minEth: snapshot.profile.minUsualTransferEth, maxEth: snapshot.profile.maxUsualTransferEth }, source: 'demo_fixture' },
+    { memoryType: 'demo_gas_baseline', label: 'Monthly gas budget and average gas price', value: { monthlyFeeBudgetEth: snapshot.profile.monthlyFeeBudgetEth, averageFeeGwei: snapshot.profile.averageFeeGwei }, source: 'demo_fixture' },
+    ...snapshot.trustedAddresses.map((item) => ({ memoryType: 'demo_trusted_address', label: item.name, value: item, source: 'demo_fixture' })),
+    ...snapshot.favoriteCounterparties.map((item) => ({ memoryType: 'demo_counterparty', label: item.label, value: item, source: 'demo_fixture' })),
+    { memoryType: 'demo_alert_note', label: 'Previously acknowledged alert note', value: snapshot.pastAlertNotes[0], source: 'demo_fixture' },
+  ]
+
+  try {
+    const published = await publishWalrusMemory(snapshot, null, events)
+    return res.status(201).json({
       success: true,
-      memoryCount: list.length,
-      publishedCount,
-      meetsRequirement: list.length >= 10,
-      memories: list,
-      network: WALRUS_MEMORY_CONFIG.IS_MAINNET ? 'mainnet' : 'testnet',
-      suiOwner: SUI_MEMORY_OWNER
+      published: true,
+      initialized: true,
+      network: getWalrusConfig().network,
+      rootBlobId: published.rootBlobId,
+      snapshotBlobId: published.snapshotBlobId,
+      memoryCount: published.memoryCount,
+      blobIds: published.memoryBlobIds,
+      epochs: getWalrusConfig().epochs,
+      ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED,
+      note: 'These 12 records are labelled demo fixtures, not user-generated financial history.',
     })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
+  } catch (error) {
+    return res.status(502).json({ error: `Walrus seed failed: ${error.message}` })
   }
 })
 
-router.post('/memory/trust', async (req, res) => {
-  const { address, name = 'Trusted Contact', category = 'Custom' } = req.body
-  if (!address) return res.status(400).json({ error: 'Address required' })
-
-  const normalized = address.trim()
-  const exists = userMemoryProfile.trustedAddresses.find(a => a.address.toLowerCase() === normalized.toLowerCase())
-  if (!exists) {
-    userMemoryProfile.trustedAddresses.push({
-      address: normalized,
-      name,
-      category,
-      addedAt: Date.now()
-    })
-    // Write a new memory to Walrus when user trusts an address
-    const content = `Trusted: ${name} (${normalized.slice(0, 8)}…) – ${category}`
-    const result = await publishToWalrus({
-      app: 'Ledger Memory',
-      type: 'trusted_counterparty',
-      text: content,
-      address: normalized,
-      ts: Date.now()
-    }, 'trusted_counterparty')
-    storedMemories.push({
-      id: `mem-${String(storedMemories.length + 1).padStart(2, '0')}`,
-      type: 'trusted_counterparty',
-      content,
-      blobId: result.blobId,
-      published: result.ok,
-      network: result.network,
-      createdAt: result.createdAt
-    })
+router.post('/memory/trust', requireWalrusWriteAuthorization, async (req, res) => {
+  const { address, name = 'Trusted Contact', category = 'Custom', rootBlobId } = req.body || {}
+  if (typeof address !== 'string' || !/^0x[a-fA-F0-9]{40}$/.test(address.trim())) {
+    return res.status(400).json({ error: 'A valid 20-byte EVM address is required' })
   }
-  res.json({ success: true, trustedAddresses: userMemoryProfile.trustedAddresses, memoryCount: storedMemories.length })
+
+  try {
+    const stored = await loadWalrusMemory(rootBlobId)
+    if (!stored) return res.status(409).json({ error: 'Initialize Walrus memory before saving trusted addresses' })
+    const snapshot = stored.snapshot
+    const normalized = address.trim()
+    const exists = snapshot.trustedAddresses.some((item) => item.address.toLowerCase() === normalized.toLowerCase())
+    if (exists) return res.json({ success: true, published: false, trustedAddresses: snapshot.trustedAddresses, rootBlobId })
+    snapshot.trustedAddresses.push({ address: normalized, name: String(name).slice(0, 80), category: String(category).slice(0, 40), addedAt: Date.now() })
+    const published = await publishWalrusMemory(snapshot, stored.manifest, [
+      { memoryType: 'trusted_address_added', label: String(name).slice(0, 80), value: { address: normalized, category }, source: 'user_action' },
+    ])
+    return res.json({ success: true, published: true, trustedAddresses: snapshot.trustedAddresses, ...published })
+  } catch (error) {
+    return res.status(502).json({ error: `Unable to save trusted address to Walrus: ${error.message}` })
+  }
 })
 
-router.post('/memory/untrust', (req, res) => {
-  const { address } = req.body
-  if (!address) return res.status(400).json({ error: 'Address required' })
+router.post('/memory/untrust', requireWalrusWriteAuthorization, async (req, res) => {
+  const { address, rootBlobId } = req.body || {}
+  if (typeof address !== 'string' || !/^0x[a-fA-F0-9]{40}$/.test(address.trim())) {
+    return res.status(400).json({ error: 'A valid 20-byte EVM address is required' })
+  }
 
-  userMemoryProfile.trustedAddresses = userMemoryProfile.trustedAddresses.filter(
-    a => a.address.toLowerCase() !== address.trim().toLowerCase()
-  )
-  res.json({ success: true, trustedAddresses: userMemoryProfile.trustedAddresses })
+  try {
+    const stored = await loadWalrusMemory(rootBlobId)
+    if (!stored) return res.status(409).json({ error: 'Initialize Walrus memory before editing trusted addresses' })
+    const snapshot = stored.snapshot
+    const before = snapshot.trustedAddresses.length
+    snapshot.trustedAddresses = snapshot.trustedAddresses.filter((item) => item.address.toLowerCase() !== address.trim().toLowerCase())
+    if (snapshot.trustedAddresses.length === before) return res.json({ success: true, published: false, trustedAddresses: snapshot.trustedAddresses, rootBlobId })
+    const published = await publishWalrusMemory(snapshot, stored.manifest, [
+      { memoryType: 'trusted_address_removed', label: 'Trusted address removed', value: { address: address.trim() }, source: 'user_action' },
+    ])
+    return res.json({ success: true, published: true, trustedAddresses: snapshot.trustedAddresses, ...published })
+  } catch (error) {
+    return res.status(502).json({ error: `Unable to update Walrus memory: ${error.message}` })
+  }
 })
 
-router.post('/memory/dismiss-alert', (req, res) => {
-  const { alertId, note } = req.body
-  if (alertId) {
-    userMemoryProfile.dismissedAlertIds.add(alertId)
+router.post('/memory/dismiss-alert', requireWalrusWriteAuthorization, async (req, res) => {
+  const { alertId, note, rootBlobId } = req.body || {}
+  if (typeof alertId !== 'string' || !alertId.trim()) return res.status(400).json({ error: 'Alert ID is required' })
+
+  try {
+    const stored = await loadWalrusMemory(rootBlobId)
+    if (!stored) return res.status(409).json({ error: 'Initialize Walrus memory before recording alert decisions' })
+    const snapshot = stored.snapshot
+    if (!snapshot.dismissedAlertIds.includes(alertId)) snapshot.dismissedAlertIds.push(alertId)
     if (note) {
-      userMemoryProfile.pastAlertNotes.unshift({
-        txHash: alertId,
-        rule: 'dismissed_by_user',
-        note,
-        timestamp: Date.now()
-      })
+      snapshot.pastAlertNotes.unshift({ txHash: alertId, rule: 'dismissed_by_user', note: String(note).slice(0, 300), timestamp: Date.now() })
     }
+    const published = await publishWalrusMemory(snapshot, stored.manifest, [
+      { memoryType: 'alert_dismissed', label: 'User dismissed an alert', value: { alertId, note: String(note || '') }, source: 'user_action' },
+    ])
+    return res.json({ success: true, published: true, dismissedCount: snapshot.dismissedAlertIds.length, ...published })
+  } catch (error) {
+    return res.status(502).json({ error: `Unable to record alert decision in Walrus: ${error.message}` })
   }
-  res.json({ success: true, dismissedCount: userMemoryProfile.dismissedAlertIds.size })
 })
 
-// Chat Q&A Endpoint
-router.post('/chat/ask', (req, res) => {
-  const { query, address } = req.body
-  if (!query) return res.status(400).json({ error: 'Query is required' })
+// Chat answers are grounded in the retrieved Walrus snapshot, not process memory.
+router.post('/chat/ask', async (req, res) => {
+  const { query, address, rootBlobId } = req.body || {}
+  if (typeof query !== 'string' || !query.trim()) return res.status(400).json({ error: 'Query is required' })
 
-  const q = query.toLowerCase().trim()
-  const recalledMemories = []
-  let answer = ''
+  try {
+    const stored = await loadWalrusMemory(rootBlobId)
+    if (!stored) return res.status(409).json({ error: 'Walrus memory is not initialized yet. Initialize it in the Memory tab first.' })
 
-  if (q.includes('fee') || q.includes('gas') || q.includes('overpay')) {
-    recalledMemories.push(`Monthly gas budget of ${userMemoryProfile.monthlyFeeBudgetEth} ETH set in Walrus Memory.`)
-    recalledMemories.push(`Historical average gas price remembered as ${userMemoryProfile.averageFeeGwei} Gwei.`)
+    const profile = stored.snapshot.profile
+    const trustedAddresses = stored.snapshot.trustedAddresses
+    const q = query.toLowerCase().trim()
+    const recalledMemories = []
+    let answer = ''
 
-    answer = `Based on your recent transaction receipts, network gas fees stayed under your Walrus-remembered monthly fee cap of ${userMemoryProfile.monthlyFeeBudgetEth} ETH. You have not overpaid on fees.`
-  } else if (q.includes('flag') || q.includes('alert') || q.includes('unusual') || q.includes('warning')) {
-    recalledMemories.push(`Habitual transfer range: ${userMemoryProfile.minUsualTransferEth} to ${userMemoryProfile.maxUsualTransferEth} ETH.`)
-    recalledMemories.push(`Duplicate payment inspection window: 60 minutes.`)
-    recalledMemories.push(`1 flagged transaction acknowledged earlier in memory.`)
-
-    answer = `Transactions were flagged because they breached your customary transfer ceiling of ${userMemoryProfile.maxUsualTransferEth} ETH or were sent to unindexed counterparties outside your ${userMemoryProfile.trustedAddresses.length} trusted Walrus contacts.`
-  } else if (q.includes('who is') || q.includes('address') || q.includes('counterparty') || q.includes('0x')) {
-    const matchedAddr = userMemoryProfile.trustedAddresses.find(a => q.includes(a.address.toLowerCase().slice(0, 10)) || q.includes(a.name.toLowerCase()))
-    
-    if (matchedAddr) {
-      recalledMemories.push(`Found in Walrus trusted address book under "${matchedAddr.name}" (${matchedAddr.category}).`)
-      answer = `Walrus Memory recognizes ${matchedAddr.address} as "${matchedAddr.name}", tagged as a trusted ${matchedAddr.category} contact added to your profile.`
+    if (q.includes('fee') || q.includes('gas') || q.includes('overpay')) {
+      recalledMemories.push(`Monthly gas budget of ${profile.monthlyFeeBudgetEth} ETH, retrieved from Walrus ${getWalrusConfig().network}.`)
+      recalledMemories.push(`Historical average gas price remembered as ${profile.averageFeeGwei} Gwei.`)
+      answer = `Your saved monthly gas budget is ${profile.monthlyFeeBudgetEth} ETH and your stored average gas baseline is ${profile.averageFeeGwei} Gwei. Compare these limits with the latest Tatum receipts before deciding whether fees were unusually high.`
+    } else if (q.includes('flag') || q.includes('alert') || q.includes('unusual') || q.includes('warning')) {
+      recalledMemories.push(`Saved habitual transfer range: ${profile.minUsualTransferEth} to ${profile.maxUsualTransferEth} ETH.`)
+      recalledMemories.push(`${trustedAddresses.length} trusted addresses retrieved from Walrus ${getWalrusConfig().network}.`)
+      recalledMemories.push(`${stored.snapshot.pastAlertNotes.length} stored alert notes.`)
+      answer = `The watchdog compares transfers with your saved ${profile.maxUsualTransferEth} ETH customary ceiling and checks counterparties against your ${trustedAddresses.length} stored trusted addresses.`
+    } else if (q.includes('who is') || q.includes('address') || q.includes('counterparty') || q.includes('0x')) {
+      const matchedAddr = trustedAddresses.find(item => q.includes(item.address.toLowerCase().slice(0, 10)) || q.includes(item.name.toLowerCase()))
+      if (matchedAddr) {
+        recalledMemories.push(`Found in the Walrus trusted-address book as "${matchedAddr.name}" (${matchedAddr.category}).`)
+        answer = `Walrus Memory recognizes ${matchedAddr.address} as "${matchedAddr.name}", tagged as ${matchedAddr.category}.`
+      } else {
+        recalledMemories.push(`Searched ${trustedAddresses.length} trusted-address records retrieved from Walrus.`)
+        answer = 'This address is not present in the retrieved trusted-address records.'
+      }
     } else {
-      recalledMemories.push(`Scanned ${userMemoryProfile.trustedAddresses.length} trusted address entries in Walrus.`)
-      answer = `This address is not in your Walrus trusted address book. You can click "Trust this address" to remember it.`
+      recalledMemories.push(`Wallet profile retrieved from Walrus for ${address || profile.walletAddress}.`)
+      recalledMemories.push(`Saved transfer range: ${profile.minUsualTransferEth} – ${profile.maxUsualTransferEth} ETH.`)
+      answer = `Your retrieved memory profile contains ${trustedAddresses.length} trusted counterparties and a customary transfer range of ${profile.minUsualTransferEth} – ${profile.maxUsualTransferEth} ETH.`
     }
-  } else {
-    recalledMemories.push(`Walrus memory profile active for ${address || userMemoryProfile.walletAddress}.`)
-    recalledMemories.push(`Recorded transfer profile: ${userMemoryProfile.minUsualTransferEth} – ${userMemoryProfile.maxUsualTransferEth} ETH across ${userMemoryProfile.trustedAddresses.length} trusted addresses.`)
 
-    answer = `Ledger Memory is actively tracking your on-chain footprint. We remember that your standard transfers fall between ${userMemoryProfile.minUsualTransferEth} and ${userMemoryProfile.maxUsualTransferEth} ETH, with ${userMemoryProfile.trustedAddresses.length} trusted counterparties.`
+    return res.json({ answer, recalledMemories, timestamp: Date.now(), network: getWalrusConfig().network, memoryCount: stored.manifest.memoryCount })
+  } catch (error) {
+    return res.status(502).json({ error: `Unable to retrieve Walrus memory for chat: ${error.message}` })
   }
-
-  res.json({
-    answer,
-    recalledMemories,
-    timestamp: Date.now()
-  })
 })
 
 export default router
