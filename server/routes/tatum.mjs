@@ -880,10 +880,8 @@ router.post('/memory/seed', async (req, res) => {
   const snapshot = createDefaultMemoryState(walletAddress)
   const events = [
     { memoryType: 'demo_profile', label: 'Demo wallet profile initialized', value: walletAddress, source: 'demo_fixture' },
-    { memoryType: 'demo_habit', label: 'Customary transfer minimum', value: snapshot.profile.minUsualTransferEth, source: 'demo_fixture' },
-    { memoryType: 'demo_habit', label: 'Customary transfer maximum', value: snapshot.profile.maxUsualTransferEth, source: 'demo_fixture' },
-    { memoryType: 'demo_habit', label: 'Monthly gas budget', value: snapshot.profile.monthlyFeeBudgetEth, source: 'demo_fixture' },
-    { memoryType: 'demo_habit', label: 'Average gas price baseline', value: snapshot.profile.averageFeeGwei, source: 'demo_fixture' },
+    { memoryType: 'demo_habits', label: 'Customary transfer range', value: { minEth: snapshot.profile.minUsualTransferEth, maxEth: snapshot.profile.maxUsualTransferEth }, source: 'demo_fixture' },
+    { memoryType: 'demo_gas_baseline', label: 'Monthly gas budget and average gas price', value: { monthlyFeeBudgetEth: snapshot.profile.monthlyFeeBudgetEth, averageFeeGwei: snapshot.profile.averageFeeGwei }, source: 'demo_fixture' },
     ...snapshot.trustedAddresses.map((item) => ({ memoryType: 'demo_trusted_address', label: item.name, value: item, source: 'demo_fixture' })),
     ...snapshot.favoriteCounterparties.map((item) => ({ memoryType: 'demo_counterparty', label: item.label, value: item, source: 'demo_fixture' })),
     { memoryType: 'demo_alert_note', label: 'Previously acknowledged alert note', value: snapshot.pastAlertNotes[0], source: 'demo_fixture' },
