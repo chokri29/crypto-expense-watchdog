@@ -76,7 +76,7 @@ export function getWalrusConfig() {
     publisherUrl,
     aggregatorUrl,
     epochs: Math.max(1, Math.min(30, Number.parseInt(process.env.WALRUS_MEMORY_EPOCHS || '10', 10) || 10)),
-    ownerAddress: process.env.WALRUS_SUI_OWNER_ADDRESS || process.env.SUI_WALLET_ADDRESS || '',
+    ownerAddress: (process.env.WALRUS_SUI_OWNER_ADDRESS || process.env.SUI_WALLET_ADDRESS || '').trim(),
     authenticated: network === 'mainnet',
     jwtConfigured: network !== 'mainnet' || Boolean(process.env.WALRUS_JWT_SECRET),
   }
