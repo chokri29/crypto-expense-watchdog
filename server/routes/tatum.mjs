@@ -765,13 +765,12 @@ router.post('/watchdog/analyze', async (req, res) => {
     const amountEth = Number(tx.numericEth) || 0
     const txTime = tx.timestamp || Date.now()
     const alertId = `alert-${tx.hash || i}`
-    if (dismissedAlertIds.has(alertId)) continue
 
     const trustedMatch = trustedAddresses.find(
       (item) => item.address.toLowerCase() === recipient
     )
 
-    if (amountEth > profile.maxUsualTransferEth) {
+    if (amountEth > profile.maxUsualTransferEth && !dismissedAlertIds.has(`${alertId}-vol`)) {
       alerts.push({
         id: `${alertId}-vol`,
         txHash: tx.hash,
@@ -787,7 +786,7 @@ router.post('/watchdog/analyze', async (req, res) => {
     }
 
     const paymentKey = `${recipient}:${amountEth.toFixed(4)}`
-    if (seenPayments.has(paymentKey) && amountEth > 0) {
+    if (seenPayments.has(paymentKey) && amountEth > 0 && !dismissedAlertIds.has(`${alertId}-dup`)) {
       const prevTime = seenPayments.get(paymentKey)
       const diffMinutes = Math.round(Math.abs(txTime - prevTime) / (60 * 1000))
       alerts.push({
@@ -806,7 +805,7 @@ router.post('/watchdog/analyze', async (req, res) => {
       seenPayments.set(paymentKey, txTime)
     }
 
-    if (!trustedMatch && recipient && recipient !== 'n/a' && recipient !== '0x0000000000000000000000000000000000000000') {
+    if (!dismissedAlertIds.has(`${alertId}-new`) && !trustedMatch && recipient && recipient !== 'n/a' && recipient !== '0x0000000000000000000000000000000000000000') {
       alerts.push({
         id: `${alertId}-new`,
         txHash: tx.hash,
