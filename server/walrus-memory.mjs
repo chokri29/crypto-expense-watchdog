@@ -77,8 +77,8 @@ export async function publishWalrusJson(value) {
 }
 
 export async function readWalrusBytes(blobId) {
-  if (typeof blobId !== 'string' || blobId.length < 20 || blobId.length > 200) {
-    throw new Error('Invalid Walrus blob ID')
+  if (!isValidWalrusBlobId(blobId)) {
+    throw new Error('Invalid Walrus blob ID; expected a 43-character URL-safe base64 identifier')
   }
 
   const { aggregatorUrl } = getWalrusConfig()
@@ -119,5 +119,5 @@ export async function readWalrusJson(blobId) {
 }
 
 export function isValidWalrusBlobId(blobId) {
-  return typeof blobId === 'string' && blobId.length >= 20 && blobId.length <= 200 && /^[A-Za-z0-9_=-]+$/.test(blobId)
+  return typeof blobId === 'string' && /^[A-Za-z0-9_-]{43}$/.test(blobId)
 }
