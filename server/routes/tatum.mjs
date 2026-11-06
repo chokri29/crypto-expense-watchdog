@@ -1054,12 +1054,12 @@ router.post('/memory/seed/snapshot', requireWalrusWriteAuthorization, async (req
 
   try {
     const published = await publishWalrusJson({
+      ...snapshot,
       schemaVersion: 1,
       kind: 'ledger-memory-snapshot',
       network: getWalrusConfig().network,
       createdAt,
       seedId,
-      ...snapshot,
     }, { timeoutMs: 30000 })
     const verified = await readWalrusJson(published.blobId, { timeoutMs: 6000, retries: 2 })
     if (verified?.kind !== 'ledger-memory-snapshot' || verified?.seedId !== seedId) {
