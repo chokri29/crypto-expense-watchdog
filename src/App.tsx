@@ -138,6 +138,8 @@ function storeMemoryRoot(rootBlobId: string, network = 'testnet'): void {
   } catch {
     throw new Error('This browser could not persist the Walrus root blob ID locally.');
   }
+}
+
 // Mobile-friendly ETH balance: max 9 digit characters, last digit rounded up (+1 style)
 function formatEthBalance(raw: string | number): string {
   const n = typeof raw === 'number' ? raw : parseFloat(String(raw));
