@@ -288,7 +288,10 @@ router.get('/status', async (_req, res) => {
       walrusConfig: {
         aggregatorUrl: WALRUS_MEMORY_CONFIG.AGGREGATOR_URL,
         publisherUrl: WALRUS_MEMORY_CONFIG.PUBLISHER_URL,
-        epochId: WALRUS_MEMORY_CONFIG.MEMORY_EPOCH_ID
+        epochId: WALRUS_MEMORY_CONFIG.MEMORY_EPOCH_ID,
+        network: 'testnet',
+        epochs: getWalrusConfig().epochs,
+        ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED
       }
     })
   } catch (error) {
