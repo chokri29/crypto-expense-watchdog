@@ -2,9 +2,9 @@
 
 **A mobile-first crypto expense watchdog that actually remembers its user.**
 
-Built primarily with [Tatum AI Builder](https://ai.tatum.io) for the **Tatum × Walrus Total Recall Hackathon** (Consumer Finance Apps track).
+Built primarily with [Tatum AI Builder](https://dashboard.tatum.io/ai-builder/crypto-expense-watchdog-644bf1?logged=true&productId=6a95cab64eeb5d2dc302a88b&chat=ses_e9062af70ffeuI6OQT24dGnhQS) for the **Tatum × Walrus Total Recall Hackathon** (Consumer Finance Apps track).
 
-Live demo: [Tatum AI Builder Dashboard](https://board.tatum.io) (search for “Ledger Memory”)
+Live demo: [Tatum AI Builder Dashboard](https://crypto-expense-watch.vercel.app/) (search for “Ledger Memory”)
 
 ---
 
