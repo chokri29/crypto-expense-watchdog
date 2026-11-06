@@ -167,6 +167,7 @@ export function App() {
     epochs: 10,
     ownerAddressConfigured: false
   });
+  const [memoryInitializing, setMemoryInitializing] = useState(false);
   const [newTrustAddress, setNewTrustAddress] = useState('');
   const [newTrustName, setNewTrustName] = useState('');
   const [newTrustCategory, setNewTrustCategory] = useState('Custom');
@@ -326,6 +327,8 @@ export function App() {
 
 
   const handleInitializeMemory = async () => {
+    if (memoryInitializing) return;
+    setMemoryInitializing(true);
     try {
       const res = await fetch('/api/tatum/memory/seed', {
         method: 'POST',
@@ -345,9 +348,11 @@ export function App() {
         ownerAddressConfigured: Boolean(data.ownerAddressConfigured)
       });
       await loadAllData(activeAddress, demoMode);
-      showToast(String(data.memoryCount) + ' demo memories published to Walrus Testnet.');
+      showToast(String(data.memoryCount) + ' demo memories published and read back from Walrus Testnet.');
     } catch (err: any) {
       setApiError(err.message || 'Unable to initialize Walrus memory.');
+    } finally {
+      setMemoryInitializing(false);
     }
   };
 
@@ -1148,10 +1153,11 @@ export function App() {
                   <button
                     type="button"
                     onClick={handleInitializeMemory}
-                    className="inline-flex items-center justify-center gap-sm rounded-lg bg-brand-solid px-lg py-sm text-sm font-semibold text-primary-on-brand shadow-xs hover:bg-brand-solid-hover focus-visible:ring-2 focus-visible:ring-focus-ring"
+                    disabled={memoryInitializing}
+                    className="inline-flex items-center justify-center gap-sm rounded-lg bg-brand-solid px-lg py-sm text-sm font-semibold text-primary-on-brand shadow-xs hover:bg-brand-solid-hover focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50"
                   >
                     <Database className="size-4 shrink-0" />
-                    Publish 12 demo memories to Walrus Testnet
+                    {memoryInitializing ? 'Publishing and verifying...' : 'Publish 12 demo memories to Walrus Testnet'}
                   </button>
                 </div>
               )}
@@ -1160,6 +1166,7 @@ export function App() {
                   <p className="text-xs font-semibold text-secondary">Walrus Testnet manifest loaded</p>
                   <p className="text-xs text-tertiary mt-xxs">{memoryStore.memoryCount} memory records · {memoryStore.epochs} storage epochs</p>
                   <p className="text-xs text-tertiary mt-xxs break-all">Root blob: {memoryStore.rootBlobId}</p>
+                  <p className="text-xs text-tertiary mt-xxs">This browser stores the root pointer locally. Save the ID before moving to another browser or device. Walrus blobs are public.</p>
                   <p className="text-xs text-tertiary mt-xxs">{memoryStore.ownerAddressConfigured ? 'Sui owner address configured for blob objects.' : 'Publisher owns the blob objects; no Sui recipient address is configured.'}</p>
                 </div>
               )}
