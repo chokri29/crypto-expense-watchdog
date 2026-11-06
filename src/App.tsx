@@ -2,8 +2,7 @@
 // the app runs fully open (no login wall).
 import * as ClerkReact from '@clerk/clerk-react';
 
-const useAuth = ClerkReact.useAuth ?? (() => ({ isLoaded: true, isSignedIn: true, getToken: async () => null }));
-const SignIn = ClerkReact.SignIn ?? (() => null);
+const useAuth = ClerkReact.useAuth ?? (() => ({ getToken: async () => null }));
 
 
 import React, { useState, useEffect } from 'react';
@@ -146,7 +145,7 @@ function formatEthBalance(raw: string | number): string {
 }
 
 export function App() {
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { getToken } = useAuth();
 
 const clerkEnabled = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 
@@ -232,13 +231,11 @@ const apiFetch = async (
   };
 
   useEffect(() => {
-  if (clerkEnabled && (!isLoaded || !isSignedIn)) return;
-
-  (async () => {
-    const useDemo = await fetchStatus();
-    await loadAllData(activeAddress, useDemo);
-  })();
-}, [isLoaded, isSignedIn]);
+    (async () => {
+      const useDemo = await fetchStatus();
+      await loadAllData(activeAddress, useDemo);
+    })();
+  }, []);
 
   const fetchStatus = async () => {
     try {
@@ -470,22 +467,6 @@ const apiFetch = async (
     return `${diffDays}d ago`;
   };
 
-  // Auth gate only when Clerk is configured
-  if (clerkEnabled && !isLoaded) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        Loading authentication...
-      </div>
-    );
-  }
-
-  if (clerkEnabled && !isSignedIn) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-secondary p-4">
-        <SignIn routing="hash" />
-      </div>
-    );
-  }
   return (
     <div className="app-shell min-h-screen text-primary flex flex-col font-sans">
       {/* Toast Notification */}
