@@ -92,6 +92,17 @@ async function publishWalrusMemory(snapshot, previousManifest = null, events = [
     snapshotBlobId: snapshotResult.blobId,
   })
 
+  // A successful publisher response is not enough: verify that the manifest,
+  // snapshot, and every individual memory record can be read back via Walrus.
+  const verified = await loadWalrusMemory(manifestResult.blobId)
+  if (!verified || verified.manifest.memoryCount !== memoryBlobIds.length) {
+    throw new Error('Walrus manifest readback did not match the published memory count')
+  }
+  const verifiedRecords = await Promise.all(memoryBlobIds.map((blobId) => readWalrusJson(blobId)))
+  if (verifiedRecords.some((record) => record?.schemaVersion !== 1 || record?.kind !== 'ledger-memory-record')) {
+    throw new Error('One or more Walrus memory records failed readback validation')
+  }
+
   return {
     rootBlobId: manifestResult.blobId,
     snapshotBlobId: snapshotResult.blobId,
@@ -102,7 +113,7 @@ async function publishWalrusMemory(snapshot, previousManifest = null, events = [
   }
 }
 
-// User Profile Baseline Memory (Stored in Walrus / cached in session)
+// Demo fixture defaults used only to initialize a first Walrus Testnet snapshot.
 let userMemoryProfile = {
   walletAddress: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
   minUsualTransferEth: 0.05,
