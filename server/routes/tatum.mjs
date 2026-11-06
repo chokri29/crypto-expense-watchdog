@@ -9,7 +9,7 @@ const router = Router()
 const WALRUS_MEMORY_CONFIG = {
   get AGGREGATOR_URL() { return getWalrusConfig().aggregatorUrl },
   get PUBLISHER_URL() { return getWalrusConfig().publisherUrl },
-  get MEMORY_EPOCH_ID() { return `walrus-testnet-${getWalrusConfig().epochs}-epochs` },
+  get STORAGE_DURATION() { return `${getWalrusConfig().epochs} Testnet epochs` },
   get IS_CONFIGURED() { return Boolean(getWalrusConfig().publisherUrl) },
   get OWNER_CONFIGURED() { return isValidSuiAddress(getWalrusConfig().ownerAddress) },
 }
@@ -88,6 +88,7 @@ async function publishWalrusMemory(snapshot, previousManifest = null, events = [
     createdAt: previousManifest?.createdAt || Date.now(),
     updatedAt: Date.now(),
     memoryCount: memoryBlobIds.length,
+    storageEpochs: getWalrusConfig().epochs,
     memoryBlobIds,
     snapshotBlobId: snapshotResult.blobId,
   })
@@ -281,7 +282,7 @@ router.get('/status', async (_req, res) => {
       walrusConfig: {
         aggregatorUrl: WALRUS_MEMORY_CONFIG.AGGREGATOR_URL,
         publisherUrl: WALRUS_MEMORY_CONFIG.PUBLISHER_URL,
-        epochId: WALRUS_MEMORY_CONFIG.MEMORY_EPOCH_ID,
+        storageDuration: WALRUS_MEMORY_CONFIG.STORAGE_DURATION,
         network: 'testnet',
         epochs: getWalrusConfig().epochs,
         ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED
