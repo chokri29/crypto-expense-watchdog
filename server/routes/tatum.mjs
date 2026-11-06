@@ -50,11 +50,11 @@ function createDefaultMemoryState(walletAddress = userMemoryProfile.walletAddres
   }
 }
 
-async function loadWalrusMemory(rootBlobId) {
+async function loadWalrusMemory(rootBlobId, readOptions = {}) {
   if (!rootBlobId) return null
   if (!isValidWalrusBlobId(rootBlobId)) throw new Error('Invalid Walrus memory root blob ID')
 
-  const manifest = await readWalrusJson(rootBlobId)
+  const manifest = await readWalrusJson(rootBlobId, readOptions)
   if (
     manifest?.schemaVersion !== 1 ||
     manifest?.kind !== 'ledger-memory-manifest' ||
@@ -68,7 +68,7 @@ async function loadWalrusMemory(rootBlobId) {
     throw new Error('Walrus memory manifest is invalid or unsupported')
   }
 
-  const snapshot = await readWalrusJson(manifest.snapshotBlobId)
+  const snapshot = await readWalrusJson(manifest.snapshotBlobId, readOptions)
   if (
     snapshot?.schemaVersion !== 1 ||
     snapshot?.kind !== 'ledger-memory-snapshot' ||
@@ -88,45 +88,80 @@ async function loadWalrusMemory(rootBlobId) {
 async function publishWalrusMemory(snapshot, previousManifest = null, events = []) {
   const memoryBlobIds = [...(previousManifest?.memoryBlobIds || [])]
   const newMemoryBlobIds = []
-  for (const event of events) {
-    const stored = await publishWalrusJson({
-      schemaVersion: 1,
-      kind: 'ledger-memory-record',
-      network: getWalrusConfig().network,
-      createdAt: Date.now(),
-      ...event,
-    })
-    memoryBlobIds.push(stored.blobId)
-    newMemoryBlobIds.push(stored.blobId)
+  const publishOptions = { timeoutMs: 10000 }
+  const verificationOptions = { timeoutMs: 8000, retries: 1 }
+
+  // Walrus uploads are independent. Publish in bounded batches to avoid
+  // serial network latency without overwhelming the public publisher.
+  const batchSize = 6
+  for (let offset = 0; offset < events.length; offset += batchSize) {
+    const batch = events.slice(offset, offset + batchSize)
+    let storedBatch
+    try {
+      storedBatch = await Promise.all(batch.map((event) => publishWalrusJson({
+        schemaVersion: 1,
+        kind: 'ledger-memory-record',
+        network: getWalrusConfig().network,
+        createdAt: Date.now(),
+        ...event,
+      }, publishOptions)))
+    } catch (error) {
+      throw new Error(`Walrus record upload batch ${Math.floor(offset / batchSize) + 1} failed: ${error.message}`)
+    }
+    const batchBlobIds = storedBatch.map((stored) => stored.blobId)
+    memoryBlobIds.push(...batchBlobIds)
+    newMemoryBlobIds.push(...batchBlobIds)
   }
 
-  const snapshotResult = await publishWalrusJson({
-    schemaVersion: 1,
-    kind: 'ledger-memory-snapshot',
-    network: getWalrusConfig().network,
-    updatedAt: Date.now(),
-    ...snapshot,
-  })
+  let snapshotResult
+  try {
+    snapshotResult = await publishWalrusJson({
+      schemaVersion: 1,
+      kind: 'ledger-memory-snapshot',
+      network: getWalrusConfig().network,
+      updatedAt: Date.now(),
+      ...snapshot,
+    }, publishOptions)
+  } catch (error) {
+    throw new Error(`Walrus snapshot upload failed: ${error.message}`)
+  }
 
-  const manifestResult = await publishWalrusJson({
-    schemaVersion: 1,
-    kind: 'ledger-memory-manifest',
-    network: getWalrusConfig().network,
-    createdAt: previousManifest?.createdAt || Date.now(),
-    updatedAt: Date.now(),
-    memoryCount: memoryBlobIds.length,
-    storageEpochs: getWalrusConfig().epochs,
-    memoryBlobIds,
-    snapshotBlobId: snapshotResult.blobId,
-  })
+  let manifestResult
+  try {
+    manifestResult = await publishWalrusJson({
+      schemaVersion: 1,
+      kind: 'ledger-memory-manifest',
+      network: getWalrusConfig().network,
+      createdAt: previousManifest?.createdAt || Date.now(),
+      updatedAt: Date.now(),
+      memoryCount: memoryBlobIds.length,
+      storageEpochs: getWalrusConfig().epochs,
+      memoryBlobIds,
+      snapshotBlobId: snapshotResult.blobId,
+    }, publishOptions)
+  } catch (error) {
+    throw new Error(`Walrus manifest upload failed: ${error.message}`)
+  }
 
-  // A successful publisher response is not enough: verify that the manifest,
-  // snapshot, and every individual memory record can be read back via Walrus.
-  const verified = await loadWalrusMemory(manifestResult.blobId)
+  // Verify the root and snapshot with short, bounded reads. The records are
+  // then checked in parallel; no individual read can consume the full
+  // Vercel function duration through repeated 20-second retries.
+  let verified
+  try {
+    verified = await loadWalrusMemory(manifestResult.blobId, verificationOptions)
+  } catch (error) {
+    throw new Error(`Walrus manifest/snapshot readback failed: ${error.message}`)
+  }
   if (!verified || verified.manifest.memoryCount !== memoryBlobIds.length) {
     throw new Error('Walrus manifest readback did not match the published memory count')
   }
-  const verifiedRecords = await Promise.all(newMemoryBlobIds.map((blobId) => readWalrusJson(blobId)))
+
+  let verifiedRecords
+  try {
+    verifiedRecords = await Promise.all(newMemoryBlobIds.map((blobId) => readWalrusJson(blobId, verificationOptions)))
+  } catch (error) {
+    throw new Error(`Walrus memory-record readback failed: ${error.message}`)
+  }
   if (verifiedRecords.some((record) => record?.schemaVersion !== 1 || record?.kind !== 'ledger-memory-record')) {
     throw new Error('One or more Walrus memory records failed readback validation')
   }
