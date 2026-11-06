@@ -8,7 +8,7 @@ This guide prepares Ledger Memory for a privately operated, authenticated Walrus
 - Mainnet is opt-in with `WALRUS_NETWORK=mainnet`.
 - Mainnet reads default to Mysten Labs' public aggregator: `https://aggregator.walrus-mainnet.walrus.space`.
 - Mainnet writes require a privately operated publisher URL and a shared JWT secret.
-- The backend signs a fresh HS256 JWT for each individual blob upload. Each token has a unique `jti`, a short expiry, an exact `epochs` claim, and a `max_size` claim. The bearer token is never sent to the browser.
+- The backend protects Mainnet memory write routes with a server-only admin token, then signs a fresh HS256 JWT for each individual blob upload. Each token has a unique `jti`, a short expiry, an exact `epochs` claim, and a `max_size` claim. The bearer token is never sent to the browser.
 - Every published manifest, snapshot, and memory record is read back from the configured aggregator before the API reports success.
 
 ## Environment variables
@@ -23,15 +23,16 @@ Configure these only when the private Mainnet publisher has been deployed:
 | `WALRUS_JWT_SECRET` | Same 32-byte-or-longer secret configured on the publisher |
 | `WALRUS_MEMORY_EPOCHS` | Storage duration, 1–30; application default is 10 |
 | `WALRUS_SUI_OWNER_ADDRESS` | Optional Sui address to receive created Blob objects |
+| `WALRUS_MAINNET_ADMIN_TOKEN` | Strong server-only token required for Mainnet write API calls |
 
-Generate a secret on a trusted machine with:
+Generate the JWT signing secret and the separate server-only admin token on a trusted machine. Keep both in a password manager and backend environment only:
 
 ```sh
 printf '0x'
 openssl rand -hex 32
 ```
 
-Use the exact same secret in the publisher's `--jwt-decode-secret` setting and the backend's `WALRUS_JWT_SECRET`. Do not commit it, paste it into chat, or expose it as a `VITE_*` variable. The backend accepts a `0x`-prefixed hexadecimal secret or a plain UTF-8 secret of at least 32 bytes.
+Use the first secret (the `0x`-prefixed value) in the publisher's `--jwt-decode-secret` setting and the backend's `WALRUS_JWT_SECRET`. Generate a separate random value for `WALRUS_MAINNET_ADMIN_TOKEN`. Do not commit it, paste it into chat, or expose it as a `VITE_*` variable. The backend accepts a `0x`-prefixed hexadecimal secret or a plain UTF-8 secret of at least 32 bytes.
 
 ## Publisher host preparation (no funding yet)
 
@@ -50,6 +51,10 @@ The documented authenticated publisher options are:
 - `--jwt-verify-upload`
 
 The publisher's JWT secret must match `WALRUS_JWT_SECRET` on the backend. The backend creates a new one-use token per PUT because the publisher rejects a reused `jti`.
+
+## Mainnet write authorization
+
+The app currently has no authenticated per-user backend sessions. To avoid exposing a funded publisher to anonymous visitors, Mainnet write routes require the `x-walrus-admin-token` request header to match the server-only `WALRUS_MAINNET_ADMIN_TOKEN`. This token must never be embedded in the frontend or a `VITE_*` variable. The current browser UI does not send this admin token, so Mainnet writes remain intentionally unavailable from the public UI until a proper user-authentication and quota model is implemented. An operator can perform controlled administrative seed operations through a trusted backend/API client after deployment.
 
 ## Application activation checklist
 
