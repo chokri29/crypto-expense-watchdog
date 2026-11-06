@@ -28,11 +28,16 @@ Configure these only when the private Mainnet publisher has been deployed:
 Generate the JWT signing secret and the separate server-only admin token on a trusted machine. Keep both in a password manager and backend environment only:
 
 ```sh
-printf '0x'
-openssl rand -hex 32
+umask 077
+{
+  printf 'WALRUS_JWT_SECRET=0x%s\\n' "$(openssl rand -hex 32)"
+  printf 'WALRUS_MAINNET_ADMIN_TOKEN=%s\\n' "$(openssl rand -hex 32)"
+} > walrus-mainnet-secrets.env
 ```
 
-Use the first secret (the `0x`-prefixed value) in the publisher's `--jwt-decode-secret` setting and the backend's `WALRUS_JWT_SECRET`. Generate a separate random value for `WALRUS_MAINNET_ADMIN_TOKEN`. Do not commit it, paste it into chat, or expose it as a `VITE_*` variable. The backend accepts a `0x`-prefixed hexadecimal secret or a plain UTF-8 secret of at least 32 bytes.
+Keep this file outside the repository and never commit it.
+
+Use the `WALRUS_JWT_SECRET` value in the publisher's `--jwt-decode-secret` setting and the backend's `WALRUS_JWT_SECRET`. The separate `WALRUS_MAINNET_ADMIN_TOKEN` is only for the backend write guard. Do not commit either secret, paste them into chat, or expose them as `VITE_*` variables. The backend accepts a `0x`-prefixed hexadecimal secret or a plain UTF-8 secret of at least 32 bytes.
 
 ## Publisher host preparation (no funding yet)
 
