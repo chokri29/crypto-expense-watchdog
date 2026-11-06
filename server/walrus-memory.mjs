@@ -86,7 +86,7 @@ export function isValidSuiAddress(address) {
   return typeof address === 'string' && /^0x[a-fA-F0-9]{64}$/.test(address.trim())
 }
 
-export async function publishWalrusJson(value) {
+export async function publishWalrusJson(value, { timeoutMs = REQUEST_TIMEOUT_MS } = {}) {
   const config = getWalrusConfig()
   if (!config.publisherUrl) throw new Error('WALRUS_PUBLISHER_URL must point to your privately operated authenticated Mainnet publisher')
   const body = JSON.stringify(value)
@@ -113,7 +113,7 @@ export async function publishWalrusJson(value) {
     method: 'PUT',
     headers,
     body,
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   })
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 500)
@@ -138,7 +138,7 @@ export async function publishWalrusJson(value) {
   }
 }
 
-export async function readWalrusBytes(blobId) {
+export async function readWalrusBytes(blobId, { timeoutMs = REQUEST_TIMEOUT_MS, retries = 5 } = {}) {
   if (!isValidWalrusBlobId(blobId)) {
     throw new Error('Invalid Walrus blob ID; expected a 43-character URL-safe base64 identifier')
   }
@@ -147,9 +147,9 @@ export async function readWalrusBytes(blobId) {
   const url = `${aggregatorUrl}/v1/blobs/${encodeURIComponent(blobId)}`
   let lastError
 
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  for (let attempt = 0; attempt < retries; attempt += 1) {
     try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+      const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
       if (response.ok) return Buffer.from(await response.arrayBuffer())
       const detail = (await response.text()).slice(0, 250)
       const retryable = response.status === 404 || response.status >= 500
@@ -160,7 +160,7 @@ export async function readWalrusBytes(blobId) {
       }
     } catch (error) {
       lastError = error
-      if (error?.retryable === false || attempt === 4) break
+      if (error?.retryable === false || attempt === retries - 1) break
     }
     await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)))
   }
@@ -168,8 +168,8 @@ export async function readWalrusBytes(blobId) {
   throw lastError || new Error('Unable to read Walrus blob')
 }
 
-export async function readWalrusJson(blobId) {
-  const bytes = await readWalrusBytes(blobId)
+export async function readWalrusJson(blobId, options = {}) {
+  const bytes = await readWalrusBytes(blobId, options)
   if (bytes.byteLength > MAX_BLOB_BYTES) {
     throw new Error('Walrus memory blob exceeds the 256 KiB application limit')
   }
