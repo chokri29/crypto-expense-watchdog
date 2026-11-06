@@ -341,7 +341,7 @@ export function App() {
         memoryCount: Number(data.memoryCount) || 0,
         blobIds: Array.isArray(data.blobIds) ? data.blobIds : [],
         network: data.network || 'testnet',
-        epochs: 10,
+        epochs: Number(data.epochs) || 10,
         ownerAddressConfigured: Boolean(data.ownerAddressConfigured)
       });
       await loadAllData(activeAddress, demoMode);
@@ -1164,8 +1164,8 @@ export function App() {
                 </div>
               )}
 
-              {/* Habit Metrics */}
-              <div className="grid grid-cols-2 gap-sm pt-xs border-t border-secondary">
+              {memoryStore.initialized && (
+                <div className="grid grid-cols-2 gap-sm pt-xs border-t border-secondary">
                 <div className="bg-secondary p-sm rounded-lg border border-secondary">
                   <span className="text-tertiary text-xs">Customary Transfer Size</span>
                   <div className="text-sm font-bold text-primary mt-xxs">
@@ -1180,7 +1180,8 @@ export function App() {
                   </div>
                   <span className="text-tertiary text-xs">Avg: {memoryProfile.averageFeeGwei} Gwei</span>
                 </div>
-              </div>
+                </div>
+              )}
             </section>
 
             {/* Favorite Counterparties */}
