@@ -901,6 +901,7 @@ router.post('/memory/seed', async (req, res) => {
       snapshotBlobId: published.snapshotBlobId,
       memoryCount: published.memoryCount,
       blobIds: published.memoryBlobIds,
+      epochs: getWalrusConfig().epochs,
       ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED,
       note: 'These 12 records are labelled demo fixtures, not user-generated financial history.',
     })
