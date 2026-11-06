@@ -372,7 +372,7 @@ export function App() {
   };
 
   const updateMemoryStoreFromResponse = (data: any) => {
-    if (data.rootBlobId) storeMemoryRoot(data.rootBlobId);
+    if (data.rootBlobId) storeMemoryRoot(data.rootBlobId, data.network || memoryStore.network);
     setMemoryStore(prev => ({
       ...prev,
       initialized: true,
@@ -410,7 +410,7 @@ export function App() {
 
   const handleUntrustAddress = async (addressToUntrust: string) => {
     try {
-      const rootBlobId = getStoredMemoryRoot();
+      const rootBlobId = getStoredMemoryRoot(memoryStore.network);
       if (!rootBlobId) throw new Error('Initialize Walrus memory before editing trusted addresses.');
       const res = await fetch('/api/tatum/memory/untrust', {
         method: 'POST',
@@ -429,7 +429,7 @@ export function App() {
 
   const handleDismissAlert = async (alertId: string) => {
     try {
-      const rootBlobId = getStoredMemoryRoot();
+      const rootBlobId = getStoredMemoryRoot(memoryStore.network);
       if (!rootBlobId) throw new Error('Initialize Walrus memory before recording alert decisions.');
       const res = await fetch('/api/tatum/memory/dismiss-alert', {
         method: 'POST',
@@ -472,7 +472,7 @@ export function App() {
         body: JSON.stringify({
           query: textToSend,
           address: activeAddress,
-          rootBlobId: getStoredMemoryRoot()
+          rootBlobId: getStoredMemoryRoot(memoryStore.network)
         })
       });
 
