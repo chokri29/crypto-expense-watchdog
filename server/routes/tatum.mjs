@@ -39,7 +39,10 @@ async function loadWalrusMemory(rootBlobId) {
     manifest?.schemaVersion !== 1 ||
     manifest?.kind !== 'ledger-memory-manifest' ||
     !isValidWalrusBlobId(manifest.snapshotBlobId) ||
-    !Array.isArray(manifest.memoryBlobIds)
+    !Array.isArray(manifest.memoryBlobIds) ||
+    manifest.memoryBlobIds.length > 500 ||
+    manifest.memoryCount !== manifest.memoryBlobIds.length ||
+    manifest.memoryBlobIds.some((blobId) => !isValidWalrusBlobId(blobId))
   ) {
     throw new Error('Walrus memory manifest is invalid or unsupported')
   }
