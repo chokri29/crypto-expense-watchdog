@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { timingSafeEqual } from 'node:crypto'
+import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { tatumFetch, tatumRpc, MissingApiKeyError, tatumApiBase } from '../tatum-client.mjs'
 import { getWalrusConfig, publishWalrusJson, readWalrusJson, isValidWalrusBlobId, isValidSuiAddress } from '../walrus-memory.mjs'
 
@@ -48,6 +48,50 @@ function createDefaultMemoryState(walletAddress = userMemoryProfile.walletAddres
     dismissedAlertIds: [],
     pastAlertNotes: userMemoryProfile.pastAlertNotes.map((item) => ({ ...item })),
   }
+}
+
+function createDemoSeedPlan() {
+  const snapshot = createDefaultMemoryState(userMemoryProfile.walletAddress)
+  const events = [
+    { memoryType: 'demo_profile', label: 'Demo wallet profile initialized', value: snapshot.profile.walletAddress, source: 'demo_fixture' },
+    { memoryType: 'demo_habits', label: 'Customary transfer range', value: { minEth: snapshot.profile.minUsualTransferEth, maxEth: snapshot.profile.maxUsualTransferEth }, source: 'demo_fixture' },
+    { memoryType: 'demo_gas_baseline', label: 'Monthly gas budget and average gas price', value: { monthlyFeeBudgetEth: snapshot.profile.monthlyFeeBudgetEth, averageFeeGwei: snapshot.profile.averageFeeGwei }, source: 'demo_fixture' },
+    ...snapshot.trustedAddresses.map((item) => ({ memoryType: 'demo_trusted_address', label: item.name, value: item, source: 'demo_fixture' })),
+    ...snapshot.favoriteCounterparties.map((item) => ({ memoryType: 'demo_counterparty', label: item.label, value: item, source: 'demo_fixture' })),
+    { memoryType: 'demo_alert_note', label: 'Previously acknowledged alert note', value: snapshot.pastAlertNotes[0], source: 'demo_fixture' },
+  ]
+  return { seedId: randomUUID(), createdAt: Date.now(), snapshot, events }
+}
+
+function isValidSeedIdentity(seedId, createdAt) {
+  return typeof seedId === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(seedId) &&
+    Number.isSafeInteger(createdAt) &&
+    createdAt > 0 &&
+    createdAt <= Date.now() + 60_000
+}
+
+function isValidDemoSeedEvent(event) {
+  const allowedTypes = new Set([
+    'demo_profile',
+    'demo_habits',
+    'demo_gas_baseline',
+    'demo_trusted_address',
+    'demo_counterparty',
+    'demo_alert_note',
+  ])
+  return Boolean(
+    event &&
+    typeof event === 'object' &&
+    !Array.isArray(event) &&
+    allowedTypes.has(event.memoryType) &&
+    typeof event.label === 'string' &&
+    event.label.length > 0 &&
+    event.label.length <= 120 &&
+    event.source === 'demo_fixture' &&
+    Object.prototype.hasOwnProperty.call(event, 'value') &&
+    Buffer.byteLength(JSON.stringify(event), 'utf8') <= 16 * 1024
+  )
 }
 
 async function loadWalrusMemory(rootBlobId, readOptions = {}) {
@@ -947,42 +991,146 @@ router.get('/memory', async (req, res) => {
   }
 })
 
-// First-run demo seed: 12 separate, explicitly labelled memory records. These
-// are demonstration fixtures, not claims about real transaction history.
-router.post('/memory/seed', requireWalrusWriteAuthorization, async (req, res) => {
-  const existingRoot = typeof req.body?.rootBlobId === 'string' ? req.body.rootBlobId : ''
-  if (existingRoot) return res.status(409).json({ error: 'Memory is already initialized for this browser' })
+// Resumable first-run seed. Each Walrus write has its own Vercel invocation,
+// and the browser checkpoints every returned content-addressed blob ID.
+router.post('/memory/seed/plan', requireWalrusWriteAuthorization, (req, res) => {
+  if (typeof req.body?.rootBlobId === 'string' && req.body.rootBlobId) {
+    return res.status(409).json({ error: 'Memory is already initialized for this browser' })
+  }
+  const plan = createDemoSeedPlan()
+  return res.json({
+    success: true,
+    network: getWalrusConfig().network,
+    epochs: getWalrusConfig().epochs,
+    ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED,
+    ...plan,
+  })
+})
 
-  // Keep the seed independent of the visitor's active wallet. These are
-  // synthetic demo fixtures, not a user's actual financial profile.
-  const snapshot = createDefaultMemoryState(userMemoryProfile.walletAddress)
-  const events = [
-    { memoryType: 'demo_profile', label: 'Demo wallet profile initialized', value: snapshot.walletAddress, source: 'demo_fixture' },
-    { memoryType: 'demo_habits', label: 'Customary transfer range', value: { minEth: snapshot.profile.minUsualTransferEth, maxEth: snapshot.profile.maxUsualTransferEth }, source: 'demo_fixture' },
-    { memoryType: 'demo_gas_baseline', label: 'Monthly gas budget and average gas price', value: { monthlyFeeBudgetEth: snapshot.profile.monthlyFeeBudgetEth, averageFeeGwei: snapshot.profile.averageFeeGwei }, source: 'demo_fixture' },
-    ...snapshot.trustedAddresses.map((item) => ({ memoryType: 'demo_trusted_address', label: item.name, value: item, source: 'demo_fixture' })),
-    ...snapshot.favoriteCounterparties.map((item) => ({ memoryType: 'demo_counterparty', label: item.label, value: item, source: 'demo_fixture' })),
-    { memoryType: 'demo_alert_note', label: 'Previously acknowledged alert note', value: snapshot.pastAlertNotes[0], source: 'demo_fixture' },
-  ]
+router.post('/memory/seed/record', requireWalrusWriteAuthorization, async (req, res) => {
+  const { seedId, createdAt, index, event } = req.body || {}
+  if (!isValidSeedIdentity(seedId, createdAt) || !Number.isInteger(index) || index < 0 || index >= 12 || !isValidDemoSeedEvent(event)) {
+    return res.status(400).json({ error: 'Invalid resumable seed record request' })
+  }
 
   try {
-    const published = await publishWalrusMemory(snapshot, null, events)
+    // All inputs are checkpointed by the browser. Repeating the exact request
+    // produces identical bytes and therefore the same Walrus content-addressed blob ID.
+    const payload = {
+      ...event,
+      schemaVersion: 1,
+      kind: 'ledger-memory-record',
+      network: getWalrusConfig().network,
+      createdAt,
+      seedId,
+      index,
+    }
+    const published = await publishWalrusJson(payload, { timeoutMs: 30000 })
+    const verified = await readWalrusJson(published.blobId, { timeoutMs: 6000, retries: 2 })
+    if (verified?.kind !== 'ledger-memory-record' || verified?.seedId !== seedId || verified?.index !== index) {
+      throw new Error('Published record did not pass readback validation')
+    }
+    return res.json({ success: true, index, blobId: published.blobId, network: published.network })
+  } catch (error) {
+    return res.status(502).json({ error: `Walrus seed record ${index + 1} failed: ${error.message}` })
+  }
+})
+
+router.post('/memory/seed/snapshot', requireWalrusWriteAuthorization, async (req, res) => {
+  const { seedId, createdAt, snapshot } = req.body || {}
+  if (
+    !isValidSeedIdentity(seedId, createdAt) ||
+    !snapshot ||
+    typeof snapshot !== 'object' ||
+    !snapshot.profile ||
+    !Array.isArray(snapshot.trustedAddresses) ||
+    !Array.isArray(snapshot.favoriteCounterparties) ||
+    !Array.isArray(snapshot.dismissedAlertIds) ||
+    !Array.isArray(snapshot.pastAlertNotes) ||
+    Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > 64 * 1024
+  ) {
+    return res.status(400).json({ error: 'Invalid resumable seed snapshot request' })
+  }
+
+  try {
+    const published = await publishWalrusJson({
+      schemaVersion: 1,
+      kind: 'ledger-memory-snapshot',
+      network: getWalrusConfig().network,
+      createdAt,
+      seedId,
+      ...snapshot,
+    }, { timeoutMs: 30000 })
+    const verified = await readWalrusJson(published.blobId, { timeoutMs: 6000, retries: 2 })
+    if (verified?.kind !== 'ledger-memory-snapshot' || verified?.seedId !== seedId) {
+      throw new Error('Published snapshot did not pass readback validation')
+    }
+    return res.json({ success: true, snapshotBlobId: published.blobId, network: published.network })
+  } catch (error) {
+    return res.status(502).json({ error: `Walrus seed snapshot failed: ${error.message}` })
+  }
+})
+
+router.post('/memory/seed/finalize', requireWalrusWriteAuthorization, async (req, res) => {
+  const { seedId, createdAt, snapshotBlobId, memoryBlobIds } = req.body || {}
+  if (
+    !isValidSeedIdentity(seedId, createdAt) ||
+    !isValidWalrusBlobId(snapshotBlobId) ||
+    !Array.isArray(memoryBlobIds) ||
+    memoryBlobIds.length !== 12 ||
+    memoryBlobIds.some((blobId) => !isValidWalrusBlobId(blobId))
+  ) {
+    return res.status(400).json({ error: 'Invalid resumable seed finalization request' })
+  }
+
+  try {
+    const published = await publishWalrusJson({
+      schemaVersion: 1,
+      kind: 'ledger-memory-manifest',
+      network: getWalrusConfig().network,
+      createdAt,
+      updatedAt: createdAt,
+      seedId,
+      memoryCount: memoryBlobIds.length,
+      storageEpochs: getWalrusConfig().epochs,
+      memoryBlobIds,
+      snapshotBlobId,
+    }, { timeoutMs: 30000 })
+
+    const verified = await loadWalrusMemory(published.blobId, { timeoutMs: 6000, retries: 2 })
+    if (
+      !verified ||
+      verified.manifest.seedId !== seedId ||
+      verified.manifest.memoryCount !== 12 ||
+      verified.manifest.snapshotBlobId !== snapshotBlobId ||
+      verified.manifest.memoryBlobIds.some((blobId, index) => blobId !== memoryBlobIds[index]) ||
+      verified.snapshot.seedId !== seedId
+    ) {
+      throw new Error('Published manifest failed readback validation')
+    }
+
     return res.status(201).json({
       success: true,
       published: true,
       initialized: true,
       network: getWalrusConfig().network,
-      rootBlobId: published.rootBlobId,
-      snapshotBlobId: published.snapshotBlobId,
-      memoryCount: published.memoryCount,
-      blobIds: published.memoryBlobIds,
+      rootBlobId: published.blobId,
+      snapshotBlobId,
+      memoryCount: memoryBlobIds.length,
+      blobIds: memoryBlobIds,
       epochs: getWalrusConfig().epochs,
       ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED,
       note: 'These 12 records are labelled demo fixtures, not user-generated financial history.',
     })
   } catch (error) {
-    return res.status(502).json({ error: `Walrus seed failed: ${error.message}` })
+    return res.status(502).json({ error: `Walrus seed finalization failed: ${error.message}` })
   }
+})
+
+// Retire the old all-in-one endpoint so stale clients cannot trigger another
+// non-resumable 12-record upload.
+router.post('/memory/seed', requireWalrusWriteAuthorization, (_req, res) => {
+  return res.status(410).json({ error: 'This seed endpoint was replaced by the resumable Walrus initialization flow. Refresh the app and try again.' })
 })
 
 router.post('/memory/trust', requireWalrusWriteAuthorization, async (req, res) => {
