@@ -110,6 +110,16 @@ interface ChatMessage {
   timestamp: number;
 }
 
+interface WalrusSeedCheckpoint {
+  seedId: string;
+  createdAt: number;
+  snapshot: Record<string, any>;
+  events: Array<Record<string, any>>;
+  blobIds: Array<string | null>;
+  snapshotBlobId: string | null;
+  network: string;
+}
+
 interface MemoryStoreStatus {
   initialized: boolean;
   rootBlobId: string | null;
@@ -118,6 +128,48 @@ interface MemoryStoreStatus {
   network: string;
   epochs: number;
   ownerAddressConfigured: boolean;
+}
+
+function getMemorySeedStorageKey(network = 'testnet'): string {
+  return `ledger-memory:walrus-${network}:seed-checkpoint:v1`;
+}
+
+function getStoredMemorySeedCheckpoint(network = 'testnet'): WalrusSeedCheckpoint | null {
+  try {
+    const raw = localStorage.getItem(getMemorySeedStorageKey(network));
+    if (!raw) return null;
+    const checkpoint = JSON.parse(raw) as WalrusSeedCheckpoint;
+    if (
+      !checkpoint ||
+      typeof checkpoint.seedId !== 'string' ||
+      !Number.isSafeInteger(checkpoint.createdAt) ||
+      !checkpoint.snapshot ||
+      !Array.isArray(checkpoint.events) ||
+      checkpoint.events.length !== 12 ||
+      !Array.isArray(checkpoint.blobIds) ||
+      checkpoint.blobIds.length !== 12 ||
+      typeof checkpoint.network !== 'string'
+    ) return null;
+    return checkpoint;
+  } catch {
+    return null;
+  }
+}
+
+function storeMemorySeedCheckpoint(checkpoint: WalrusSeedCheckpoint): void {
+  try {
+    localStorage.setItem(getMemorySeedStorageKey(checkpoint.network), JSON.stringify(checkpoint));
+  } catch {
+    throw new Error('This browser could not save the Walrus seed progress. Please check available browser storage and retry.');
+  }
+}
+
+function clearMemorySeedCheckpoint(network = 'testnet'): void {
+  try {
+    localStorage.removeItem(getMemorySeedStorageKey(network));
+  } catch {
+    // The completed root pointer is already saved; a stale checkpoint is harmless.
+  }
 }
 
 function getMemoryRootStorageKey(network = 'testnet'): string {
@@ -232,6 +284,7 @@ const apiFetch = async (
     ownerAddressConfigured: false
   });
   const [memoryInitializing, setMemoryInitializing] = useState(false);
+  const [memoryInitProgress, setMemoryInitProgress] = useState('');
   const [newTrustAddress, setNewTrustAddress] = useState('');
   const [newTrustName, setNewTrustName] = useState('');
   const [newTrustCategory, setNewTrustCategory] = useState('Custom');
@@ -406,27 +459,99 @@ const apiFetch = async (
   const handleInitializeMemory = async () => {
     if (memoryInitializing) return;
     setMemoryInitializing(true);
+    setMemoryInitProgress('Preparing resumable seed...');
     try {
-      const res = await fetch('/api/tatum/memory/seed', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+      const network = memoryStore.network || 'testnet';
+      const requestJson = async (path: string, body: Record<string, any>) => {
+        const response = await fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `Walrus request failed (${response.status})`);
+        return data;
+      };
+
+      let checkpoint = getStoredMemorySeedCheckpoint(network);
+      if (!checkpoint) {
+        const plan = await requestJson('/api/tatum/memory/seed/plan', {
+          rootBlobId: getStoredMemoryRoot(network) || undefined
+        });
+        if (
+          typeof plan.seedId !== 'string' ||
+          !Number.isSafeInteger(plan.createdAt) ||
+          !plan.snapshot ||
+          !Array.isArray(plan.events) ||
+          plan.events.length !== 12
+        ) {
+          throw new Error('The Walrus seed plan was incomplete. Please retry.');
+        }
+        checkpoint = {
+          seedId: plan.seedId,
+          createdAt: plan.createdAt,
+          snapshot: plan.snapshot,
+          events: plan.events,
+          blobIds: Array.from({ length: 12 }, () => null),
+          snapshotBlobId: null,
+          network: plan.network || network
+        };
+        storeMemorySeedCheckpoint(checkpoint);
+      }
+
+      for (let index = 0; index < checkpoint.events.length; index += 1) {
+        if (checkpoint.blobIds[index]) continue;
+        setMemoryInitProgress(`Publishing memory ${index + 1}/12...`);
+        const result = await requestJson('/api/tatum/memory/seed/record', {
+          seedId: checkpoint.seedId,
+          createdAt: checkpoint.createdAt,
+          index,
+          event: checkpoint.events[index]
+        });
+        if (typeof result.blobId !== 'string' || !result.blobId) {
+          throw new Error(`Walrus did not return a blob ID for memory ${index + 1}.`);
+        }
+        checkpoint.blobIds[index] = result.blobId;
+        storeMemorySeedCheckpoint(checkpoint);
+      }
+
+      if (!checkpoint.snapshotBlobId) {
+        setMemoryInitProgress('Publishing and verifying memory snapshot...');
+        const snapshotResult = await requestJson('/api/tatum/memory/seed/snapshot', {
+          seedId: checkpoint.seedId,
+          createdAt: checkpoint.createdAt,
+          snapshot: checkpoint.snapshot
+        });
+        if (typeof snapshotResult.snapshotBlobId !== 'string' || !snapshotResult.snapshotBlobId) {
+          throw new Error('Walrus did not return a snapshot blob ID.');
+        }
+        checkpoint.snapshotBlobId = snapshotResult.snapshotBlobId;
+        storeMemorySeedCheckpoint(checkpoint);
+      }
+
+      setMemoryInitProgress('Publishing and verifying final manifest...');
+      const result = await requestJson('/api/tatum/memory/seed/finalize', {
+        seedId: checkpoint.seedId,
+        createdAt: checkpoint.createdAt,
+        snapshotBlobId: checkpoint.snapshotBlobId,
+        memoryBlobIds: checkpoint.blobIds
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Walrus memory initialization failed');
-      storeMemoryRoot(data.rootBlobId, data.network || memoryStore.network);
+      storeMemoryRoot(result.rootBlobId, result.network || checkpoint.network);
+      clearMemorySeedCheckpoint(checkpoint.network);
       setMemoryStore({
         initialized: true,
-        rootBlobId: data.rootBlobId,
-        memoryCount: Number(data.memoryCount) || 0,
-        blobIds: Array.isArray(data.blobIds) ? data.blobIds : [],
-        network: data.network || 'testnet',
-        epochs: Number(data.epochs) || 10,
-        ownerAddressConfigured: Boolean(data.ownerAddressConfigured)
+        rootBlobId: result.rootBlobId,
+        memoryCount: Number(result.memoryCount) || 0,
+        blobIds: Array.isArray(result.blobIds) ? result.blobIds : [],
+        network: result.network || checkpoint.network,
+        epochs: Number(result.epochs) || 10,
+        ownerAddressConfigured: Boolean(result.ownerAddressConfigured)
       });
+      setMemoryInitProgress('');
       await loadAllData(activeAddress, demoMode);
-      showToast(String(data.memoryCount) + ' demo memories published and read back from Walrus ' + (data.network || memoryStore.network) + '.');
+      showToast(String(result.memoryCount) + ' demo memories published and verified on Walrus ' + (result.network || checkpoint.network) + '.');
     } catch (err: any) {
+      setMemoryInitProgress('Progress saved — retry to resume.');
       setApiError(err.message || 'Unable to initialize Walrus memory.');
     } finally {
       setMemoryInitializing(false);
@@ -1218,7 +1343,7 @@ const apiFetch = async (
                     className="inline-flex items-center justify-center gap-sm rounded-lg bg-brand-solid px-lg py-sm text-sm font-semibold text-primary-on-brand shadow-xs hover:bg-brand-solid-hover focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50"
                   >
                     <Database className="size-4 shrink-0" />
-                    {memoryInitializing ? 'Publishing and verifying...' : 'Publish 12 demo memories to Walrus ' + (memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet')}
+                    {memoryInitializing ? (memoryInitProgress || 'Publishing...') : (memoryInitProgress || 'Publish 12 demo memories to Walrus ' + (memoryStore.network === 'mainnet' ? 'Mainnet' : 'Testnet'))}
                   </button>
                 </div>
               )}
