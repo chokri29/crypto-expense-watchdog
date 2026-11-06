@@ -891,10 +891,9 @@ router.post('/memory/seed', async (req, res) => {
   const existingRoot = typeof req.body?.rootBlobId === 'string' ? req.body.rootBlobId : ''
   if (existingRoot) return res.status(409).json({ error: 'Memory is already initialized for this browser' })
 
-  const walletAddress = typeof req.body?.walletAddress === 'string' && /^0x[a-fA-F0-9]{40}$/.test(req.body.walletAddress)
-    ? req.body.walletAddress
-    : userMemoryProfile.walletAddress
-  const snapshot = createDefaultMemoryState(walletAddress)
+  // Keep the seed independent of the visitor's active wallet. These are
+  // synthetic demo fixtures, not a user's actual financial profile.
+  const snapshot = createDefaultMemoryState(userMemoryProfile.walletAddress)
   const events = [
     { memoryType: 'demo_profile', label: 'Demo wallet profile initialized', value: walletAddress, source: 'demo_fixture' },
     { memoryType: 'demo_habits', label: 'Customary transfer range', value: { minEth: snapshot.profile.minUsualTransferEth, maxEth: snapshot.profile.maxUsualTransferEth }, source: 'demo_fixture' },
