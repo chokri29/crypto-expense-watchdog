@@ -62,6 +62,7 @@ async function loadWalrusMemory(rootBlobId) {
 
 async function publishWalrusMemory(snapshot, previousManifest = null, events = []) {
   const memoryBlobIds = [...(previousManifest?.memoryBlobIds || [])]
+  const newMemoryBlobIds = []
   for (const event of events) {
     const stored = await publishWalrusJson({
       schemaVersion: 1,
@@ -71,6 +72,7 @@ async function publishWalrusMemory(snapshot, previousManifest = null, events = [
       ...event,
     })
     memoryBlobIds.push(stored.blobId)
+    newMemoryBlobIds.push(stored.blobId)
   }
 
   const snapshotResult = await publishWalrusJson({
@@ -99,7 +101,7 @@ async function publishWalrusMemory(snapshot, previousManifest = null, events = [
   if (!verified || verified.manifest.memoryCount !== memoryBlobIds.length) {
     throw new Error('Walrus manifest readback did not match the published memory count')
   }
-  const verifiedRecords = await Promise.all(memoryBlobIds.map((blobId) => readWalrusJson(blobId)))
+  const verifiedRecords = await Promise.all(newMemoryBlobIds.map((blobId) => readWalrusJson(blobId)))
   if (verifiedRecords.some((record) => record?.schemaVersion !== 1 || record?.kind !== 'ledger-memory-record')) {
     throw new Error('One or more Walrus memory records failed readback validation')
   }
