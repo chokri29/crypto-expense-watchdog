@@ -38,6 +38,7 @@ async function loadWalrusMemory(rootBlobId) {
   if (
     manifest?.schemaVersion !== 1 ||
     manifest?.kind !== 'ledger-memory-manifest' ||
+    manifest?.network !== 'testnet' ||
     !isValidWalrusBlobId(manifest.snapshotBlobId) ||
     !Array.isArray(manifest.memoryBlobIds) ||
     manifest.memoryBlobIds.length > 500 ||
@@ -51,6 +52,7 @@ async function loadWalrusMemory(rootBlobId) {
   if (
     snapshot?.schemaVersion !== 1 ||
     snapshot?.kind !== 'ledger-memory-snapshot' ||
+    snapshot?.network !== 'testnet' ||
     !snapshot.profile ||
     !Array.isArray(snapshot.trustedAddresses) ||
     !Array.isArray(snapshot.favoriteCounterparties) ||
