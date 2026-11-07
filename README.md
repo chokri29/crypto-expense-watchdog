@@ -1,7 +1,7 @@
 # Ledger Memory – Crypto Expense Watchdog
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/chokri29/crypto-expense-watchdog/main/.claude/skills/image1.jpg" width="100%">
+  <img src="https://raw.githubusercontent.com/chokri29/crypto-expense-watchdog/main/.claude/skills/CEW.jpg" width="100%">
 </p>
 
 <p align="center">
