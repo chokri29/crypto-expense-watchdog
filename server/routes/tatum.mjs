@@ -1180,6 +1180,13 @@ router.post('/memory/seed/finalize', requireWalrusWriteAuthorization, async (req
       blobIds: memoryBlobIds,
       epochs: getWalrusConfig().epochs,
       ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED,
+      publisherConfigured: Boolean(getWalrusConfig().publisherUrl),
+      jwtConfigured: Boolean(getWalrusConfig().jwtConfigured),
+      mainnetAdminConfigured: Buffer.byteLength(process.env.WALRUS_MAINNET_ADMIN_TOKEN || '', 'utf8') >= 32,
+      mainnetConfigurationReady: getWalrusConfig().network === 'mainnet' &&
+        Boolean(getWalrusConfig().publisherUrl) &&
+        Boolean(getWalrusConfig().jwtConfigured) &&
+        Buffer.byteLength(process.env.WALRUS_MAINNET_ADMIN_TOKEN || '', 'utf8') >= 32,
       note: 'These 12 records are labelled demo fixtures, not user-generated financial history.',
     })
   } catch (error) {
