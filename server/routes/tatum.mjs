@@ -57,6 +57,7 @@ const WALRUS_MEMORY_CONFIG = {
 // The operator token is exchanged for a short-lived HttpOnly cookie. It is
 // never written to localStorage or returned to the browser in an API response.
 router.post('/memory/mainnet/session', (req, res) => {
+  res.set('Cache-Control', 'no-store')
   if (getWalrusConfig().network !== 'mainnet') {
     return res.status(409).json({ error: 'Operator sessions are only used when WALRUS_NETWORK=mainnet' })
   }
