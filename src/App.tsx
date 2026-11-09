@@ -586,7 +586,11 @@ const apiFetch = async (
         blobIds: Array.isArray(result.blobIds) ? result.blobIds : [],
         network: result.network || checkpoint.network,
         epochs: Number(result.epochs) || 10,
-        ownerAddressConfigured: Boolean(result.ownerAddressConfigured)
+        ownerAddressConfigured: Boolean(result.ownerAddressConfigured),
+        publisherConfigured: Boolean(result.publisherConfigured),
+        jwtConfigured: Boolean(result.jwtConfigured),
+        mainnetAdminConfigured: Boolean(result.mainnetAdminConfigured),
+        mainnetConfigurationReady: Boolean(result.mainnetConfigurationReady)
       });
       setMemoryInitProgress('');
       await loadAllData(activeAddress, demoMode);
