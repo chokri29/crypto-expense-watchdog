@@ -510,6 +510,7 @@ const apiFetch = async (
           body: JSON.stringify(body)
         });
         const data = await response.json().catch(() => ({}));
+        if (response.status === 401 && network === 'mainnet') setMainnetOperatorSessionActive(false);
         if (!response.ok) throw new Error(data.error || `Walrus request failed (${response.status})`);
         return data;
       };
@@ -630,6 +631,7 @@ const apiFetch = async (
         })
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 401 && memoryStore.network === 'mainnet') setMainnetOperatorSessionActive(false);
       if (!res.ok) throw new Error(data.error || 'Unable to save trusted address.');
       updateMemoryStoreFromResponse(data);
       setTrustedAddresses(data.trustedAddresses || []);
@@ -650,6 +652,7 @@ const apiFetch = async (
         body: JSON.stringify({ address: addressToUntrust, rootBlobId })
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 401 && memoryStore.network === 'mainnet') setMainnetOperatorSessionActive(false);
       if (!res.ok) throw new Error(data.error || 'Unable to remove trusted address.');
       updateMemoryStoreFromResponse(data);
       setTrustedAddresses(data.trustedAddresses || []);
@@ -673,6 +676,7 @@ const apiFetch = async (
         })
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 401 && memoryStore.network === 'mainnet') setMainnetOperatorSessionActive(false);
       if (!res.ok) throw new Error(data.error || 'Unable to record alert decision.');
       updateMemoryStoreFromResponse(data);
       setAlerts(prev => prev.filter(a => a.id !== alertId));
