@@ -128,6 +128,10 @@ interface MemoryStoreStatus {
   network: string;
   epochs: number;
   ownerAddressConfigured: boolean;
+  publisherConfigured?: boolean;
+  jwtConfigured?: boolean;
+  mainnetAdminConfigured?: boolean;
+  mainnetConfigurationReady?: boolean;
 }
 
 function getMemorySeedStorageKey(network = 'testnet'): string {
@@ -285,6 +289,8 @@ const apiFetch = async (
   });
   const [memoryInitializing, setMemoryInitializing] = useState(false);
   const [memoryInitProgress, setMemoryInitProgress] = useState('');
+  const [mainnetOperatorToken, setMainnetOperatorToken] = useState('');
+  const [mainnetOperatorSessionActive, setMainnetOperatorSessionActive] = useState(false);
   const [newTrustAddress, setNewTrustAddress] = useState('');
   const [newTrustName, setNewTrustName] = useState('');
   const [newTrustCategory, setNewTrustCategory] = useState('Custom');
@@ -407,8 +413,13 @@ const apiFetch = async (
         blobIds: Array.isArray(mData.memoryStore?.blobIds) ? mData.memoryStore.blobIds : [],
         network: mData.walrusConfig?.network || 'testnet',
         epochs: Number(mData.walrusConfig?.epochs) || 10,
-        ownerAddressConfigured: Boolean(mData.walrusConfig?.ownerAddressConfigured)
+        ownerAddressConfigured: Boolean(mData.walrusConfig?.ownerAddressConfigured),
+        publisherConfigured: Boolean(mData.walrusConfig?.publisherConfigured),
+        jwtConfigured: Boolean(mData.walrusConfig?.jwtConfigured),
+        mainnetAdminConfigured: Boolean(mData.walrusConfig?.mainnetAdminConfigured),
+        mainnetConfigurationReady: Boolean(mData.walrusConfig?.mainnetConfigurationReady)
       });
+      setMainnetOperatorSessionActive(Boolean(mData.walrusConfig?.operatorSessionActive));
       if (mData.profile) setMemoryProfile(mData.profile);
       setTrustedAddresses(Array.isArray(mData.trustedAddresses) ? mData.trustedAddresses : []);
       setFavoriteCounterparties(Array.isArray(mData.favoriteCounterparties) ? mData.favoriteCounterparties : []);
@@ -456,6 +467,36 @@ const apiFetch = async (
   };
 
 
+  const handleUnlockMainnetPublisher = async () => {
+    if (!mainnetOperatorToken.trim()) {
+      setApiError('Enter the backend Mainnet operator token to unlock publishing.');
+      return;
+    }
+    try {
+      const response = await fetch('/api/tatum/memory/mainnet/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: mainnetOperatorToken })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Unable to unlock Mainnet publishing.');
+      setMainnetOperatorToken('');
+      setMainnetOperatorSessionActive(true);
+      showToast('Mainnet publisher unlocked for 15 minutes.');
+    } catch (err: any) {
+      setApiError(err.message || 'Unable to unlock Mainnet publishing.');
+    }
+  };
+
+  const handleLockMainnetPublisher = async () => {
+    try {
+      await fetch('/api/tatum/memory/mainnet/session/clear', { method: 'POST' });
+    } finally {
+      setMainnetOperatorSessionActive(false);
+      showToast('Mainnet publisher session locked.');
+    }
+  };
+
   const handleInitializeMemory = async () => {
     if (memoryInitializing) return;
     setMemoryInitializing(true);
@@ -469,6 +510,7 @@ const apiFetch = async (
           body: JSON.stringify(body)
         });
         const data = await response.json().catch(() => ({}));
+        if (response.status === 401 && network === 'mainnet') setMainnetOperatorSessionActive(false);
         if (!response.ok) throw new Error(data.error || `Walrus request failed (${response.status})`);
         return data;
       };
@@ -545,7 +587,11 @@ const apiFetch = async (
         blobIds: Array.isArray(result.blobIds) ? result.blobIds : [],
         network: result.network || checkpoint.network,
         epochs: Number(result.epochs) || 10,
-        ownerAddressConfigured: Boolean(result.ownerAddressConfigured)
+        ownerAddressConfigured: Boolean(result.ownerAddressConfigured),
+        publisherConfigured: Boolean(result.publisherConfigured),
+        jwtConfigured: Boolean(result.jwtConfigured),
+        mainnetAdminConfigured: Boolean(result.mainnetAdminConfigured),
+        mainnetConfigurationReady: Boolean(result.mainnetConfigurationReady)
       });
       setMemoryInitProgress('');
       await loadAllData(activeAddress, demoMode);
@@ -585,6 +631,7 @@ const apiFetch = async (
         })
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 401 && memoryStore.network === 'mainnet') setMainnetOperatorSessionActive(false);
       if (!res.ok) throw new Error(data.error || 'Unable to save trusted address.');
       updateMemoryStoreFromResponse(data);
       setTrustedAddresses(data.trustedAddresses || []);
@@ -605,6 +652,7 @@ const apiFetch = async (
         body: JSON.stringify({ address: addressToUntrust, rootBlobId })
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 401 && memoryStore.network === 'mainnet') setMainnetOperatorSessionActive(false);
       if (!res.ok) throw new Error(data.error || 'Unable to remove trusted address.');
       updateMemoryStoreFromResponse(data);
       setTrustedAddresses(data.trustedAddresses || []);
@@ -628,6 +676,7 @@ const apiFetch = async (
         })
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 401 && memoryStore.network === 'mainnet') setMainnetOperatorSessionActive(false);
       if (!res.ok) throw new Error(data.error || 'Unable to record alert decision.');
       updateMemoryStoreFromResponse(data);
       setAlerts(prev => prev.filter(a => a.id !== alertId));
@@ -1331,6 +1380,45 @@ const apiFetch = async (
                 </span>
               </div>
 
+              {memoryStore.network === 'mainnet' && (
+                <div className="rounded-lg border border-secondary bg-secondary p-sm flex flex-col gap-sm">
+                  <div className="flex items-center justify-between gap-sm">
+                    <p className="text-xs font-semibold text-primary">Mainnet publisher readiness</p>
+                    <span className="text-xs text-tertiary">{memoryStore.mainnetConfigurationReady ? 'Configuration ready' : 'Configuration incomplete'}</span>
+                  </div>
+                  <p className="text-xs text-secondary">
+                    Publisher URL: {memoryStore.publisherConfigured ? 'configured' : 'missing'} · JWT secret: {memoryStore.jwtConfigured ? 'configured' : 'missing'} · Operator token: {memoryStore.mainnetAdminConfigured ? 'configured' : 'missing'}
+                  </p>
+                  <p className="text-xs text-tertiary">
+                    Configuration status only — it does not prove the publisher is online or that its wallet has SUI and WAL. The publisher must be deployed and funded before a Mainnet write can succeed.
+                  </p>
+                  {mainnetOperatorSessionActive ? (
+                    <div className="flex items-center justify-between gap-sm">
+                      <span className="text-xs text-secondary">Operator session active (15-minute expiry)</span>
+                      <button type="button" onClick={handleLockMainnetPublisher} className="text-xs font-semibold text-secondary underline">Lock</button>
+                    </div>
+                  ) : memoryStore.mainnetConfigurationReady ? (
+                    <div className="flex flex-col gap-xs">
+                      <label className="text-xs text-secondary" htmlFor="mainnet-operator-token">Operator token (not saved in this browser)</label>
+                      <input
+                        id="mainnet-operator-token"
+                        type="password"
+                        autoComplete="off"
+                        value={mainnetOperatorToken}
+                        onChange={(event) => setMainnetOperatorToken(event.target.value)}
+                        placeholder="Paste WALRUS_MAINNET_ADMIN_TOKEN"
+                        className="w-full rounded-lg border border-primary bg-primary px-sm py-sm text-sm text-primary"
+                      />
+                      <button type="button" onClick={handleUnlockMainnetPublisher} className="inline-flex items-center justify-center rounded-lg border border-primary bg-primary px-md py-sm text-xs font-semibold text-primary hover:bg-primary-hover">
+                        Unlock Mainnet publishing for 15 minutes
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-tertiary">Complete the backend environment configuration before unlocking Mainnet publishing.</p>
+                  )}
+                </div>
+              )}
+
               {!memoryStore.initialized && (
                 <div className="rounded-lg border border-utility-warning-200 bg-utility-warning-50 p-sm flex flex-col gap-sm">
                   <p className="text-xs text-secondary">
@@ -1339,7 +1427,7 @@ const apiFetch = async (
                   <button
                     type="button"
                     onClick={handleInitializeMemory}
-                    disabled={memoryInitializing}
+                    disabled={memoryInitializing || (memoryStore.network === 'mainnet' && (!memoryStore.mainnetConfigurationReady || !mainnetOperatorSessionActive))}
                     className="inline-flex items-center justify-center gap-sm rounded-lg bg-brand-solid px-lg py-sm text-sm font-semibold text-primary-on-brand shadow-xs hover:bg-brand-solid-hover focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-50"
                   >
                     <Database className="size-4 shrink-0" />
