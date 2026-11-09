@@ -5,21 +5,41 @@ import { getWalrusConfig, publishWalrusJson, readWalrusJson, isValidWalrusBlobId
 
 const router = Router()
 
+const MAINNET_OPERATOR_COOKIE = 'walrus_mainnet_operator'
+const MAINNET_OPERATOR_SESSION_MS = 15 * 60 * 1000
+
+function readMainnetOperatorCookie(req) {
+  const cookieHeader = req.headers.cookie || ''
+  for (const item of cookieHeader.split(';')) {
+    const separator = item.indexOf('=')
+    if (separator < 0) continue
+    if (item.slice(0, separator).trim() !== MAINNET_OPERATOR_COOKIE) continue
+    try { return decodeURIComponent(item.slice(separator + 1).trim()) } catch { return '' }
+  }
+  return ''
+}
+
+function matchesMainnetAdminToken(supplied) {
+  const expected = process.env.WALRUS_MAINNET_ADMIN_TOKEN || ''
+  if (Buffer.byteLength(expected, 'utf8') < 32 || typeof supplied !== 'string') return false
+  const expectedBytes = Buffer.from(expected, 'utf8')
+  const suppliedBytes = Buffer.from(supplied, 'utf8')
+  return expectedBytes.length === suppliedBytes.length && timingSafeEqual(expectedBytes, suppliedBytes)
+}
+
+function isMainnetOperatorAuthorized(req) {
+  return matchesMainnetAdminToken(req.get('x-walrus-admin-token') || readMainnetOperatorCookie(req))
+}
+
 function requireWalrusWriteAuthorization(req, res, next) {
   if (getWalrusConfig().network !== 'mainnet') return next()
 
   const expected = process.env.WALRUS_MAINNET_ADMIN_TOKEN || ''
-  const supplied = req.get('x-walrus-admin-token') || ''
-  if (!expected) {
-    return res.status(503).json({ error: 'Mainnet writes are disabled: configure WALRUS_MAINNET_ADMIN_TOKEN on the backend first' })
+  if (Buffer.byteLength(expected, 'utf8') < 32) {
+    return res.status(503).json({ error: 'Mainnet writes are disabled: configure a WALRUS_MAINNET_ADMIN_TOKEN of at least 32 characters on the backend' })
   }
-
-  const expectedBytes = Buffer.from(expected, 'utf8')
-  const suppliedBytes = Buffer.from(supplied, 'utf8')
-  const authorized = expectedBytes.length === suppliedBytes.length &&
-    timingSafeEqual(expectedBytes, suppliedBytes)
-  if (!authorized) {
-    return res.status(401).json({ error: 'Mainnet memory writes require the backend admin token; do not expose this token in the browser' })
+  if (!isMainnetOperatorAuthorized(req)) {
+    return res.status(401).json({ error: 'Unlock the Mainnet publisher operator session before publishing. The session is short-lived and the token is never stored in browser storage.' })
   }
   return next()
 }
@@ -33,6 +53,38 @@ const WALRUS_MEMORY_CONFIG = {
   get IS_CONFIGURED() { return Boolean(getWalrusConfig().publisherUrl) },
   get OWNER_CONFIGURED() { return isValidSuiAddress(getWalrusConfig().ownerAddress) },
 }
+
+// The operator token is exchanged for a short-lived HttpOnly cookie. It is
+// never written to localStorage or returned to the browser in an API response.
+router.post('/memory/mainnet/session', (req, res) => {
+  if (getWalrusConfig().network !== 'mainnet') {
+    return res.status(409).json({ error: 'Operator sessions are only used when WALRUS_NETWORK=mainnet' })
+  }
+  if (Buffer.byteLength(process.env.WALRUS_MAINNET_ADMIN_TOKEN || '', 'utf8') < 32) {
+    return res.status(503).json({ error: 'Mainnet operator authorization is not configured on the backend' })
+  }
+  if (!matchesMainnetAdminToken(req.body?.token)) {
+    return res.status(401).json({ error: 'The Mainnet operator token was not accepted' })
+  }
+  res.cookie(MAINNET_OPERATOR_COOKIE, process.env.WALRUS_MAINNET_ADMIN_TOKEN, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    path: '/api/tatum/memory',
+    maxAge: MAINNET_OPERATOR_SESSION_MS,
+  })
+  return res.json({ success: true, expiresInSeconds: MAINNET_OPERATOR_SESSION_MS / 1000 })
+})
+
+router.post('/memory/mainnet/session/clear', (_req, res) => {
+  res.clearCookie(MAINNET_OPERATOR_COOKIE, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    path: '/api/tatum/memory',
+  })
+  return res.json({ success: true })
+})
 
 function createDefaultMemoryState(walletAddress = userMemoryProfile.walletAddress) {
   return {
@@ -952,6 +1004,14 @@ router.get('/memory', async (req, res) => {
     network: getWalrusConfig().network,
     epochs: config.epochs,
     ownerAddressConfigured: WALRUS_MEMORY_CONFIG.OWNER_CONFIGURED,
+    publisherConfigured: Boolean(config.publisherUrl),
+    jwtConfigured: Boolean(config.jwtConfigured),
+    mainnetAdminConfigured: Buffer.byteLength(process.env.WALRUS_MAINNET_ADMIN_TOKEN || '', 'utf8') >= 32,
+    mainnetConfigurationReady: config.network === 'mainnet' &&
+      Boolean(config.publisherUrl) &&
+      Boolean(config.jwtConfigured) &&
+      Buffer.byteLength(process.env.WALRUS_MAINNET_ADMIN_TOKEN || '', 'utf8') >= 32,
+    operatorSessionActive: config.network === 'mainnet' && isMainnetOperatorAuthorized(req),
   }
 
   if (!rootBlobId) {
