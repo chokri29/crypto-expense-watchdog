@@ -1,10 +1,9 @@
-# Place inside an HTTPS server block for walrus-publisher.example.com.
-# Replace the hostname and certificate paths with your own values.
+# Add this limit_req_zone directive inside the Nginx http {} context (outside server {}).
+# Then place the server {} block below inside that same http {} context.
 limit_req_zone $binary_remote_addr zone=walrus_upload:10m rate=2r/s;
 
 server {
-    listen 443 ssl;
-    http2 on;
+    listen 443 ssl http2;
     server_name walrus-publisher.example.com;
 
     ssl_certificate     /etc/letsencrypt/live/walrus-publisher.example.com/fullchain.pem;
