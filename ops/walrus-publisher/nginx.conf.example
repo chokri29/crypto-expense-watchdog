@@ -26,6 +26,15 @@ server {
         proxy_read_timeout 45s;
     }
 
+    # Walrus documents the publisher API at /v1/api. This is a read-only
+    # discovery endpoint used by the deployment check script.
+    location = /v1/api {
+        limit_except GET { deny all; }
+        proxy_pass http://127.0.0.1:9001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
     location / {
         return 404;
     }
