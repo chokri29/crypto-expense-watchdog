@@ -91,7 +91,7 @@ The product improves the more you use it. After enough activity the “What chan
 
 - Tatum AI Builder (primary development environment)
 - Tatum Data API / RPC
-- Walrus Memory (Mainnet)
+- Walrus Memory (Testnet verified; authenticated Mainnet publishing path prepared)
 - React + TypeScript + Tailwind (generated frontend)
 - Mobile-first UI
 
