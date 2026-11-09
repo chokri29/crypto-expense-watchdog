@@ -1,0 +1,26 @@
+[Unit]
+Description=Authenticated Walrus Mainnet Publisher
+Documentation=https://docs.wal.app/docs/operator-guide/publishers/mainnet-production-guide
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=walrus
+Group=walrus
+Environment=RUST_BACKTRACE=1
+Environment=RUST_LOG=info
+EnvironmentFile=/etc/walrus/publisher.env
+ExecStart=/opt/walrus/bin/walrus --config /opt/walrus/config/publisher/client_config.yaml publisher --bind-address 127.0.0.1:9001 --metrics-address 127.0.0.1:27183 --sub-wallets-dir /opt/walrus/wallets --n-clients 2 --jwt-decode-secret=${WALRUS_JWT_SECRET} --jwt-algorithm HS256 --jwt-expiring-sec 90 --jwt-verify-upload
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/walrus/wallets /opt/walrus/config/publisher
+
+[Install]
+WantedBy=multi-user.target
