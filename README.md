@@ -46,7 +46,7 @@ Ledger Memory fixes this by combining **Tatum’s real-time on-chain data** with
 - Categorizes spending (Transfers / DeFi-DEX / NFTs / Other)
 - **Watchdog Alerts** scored against your remembered habits
 - **Memory Chat** that answers questions using your personal transaction history and patterns
-- All memories are stored on **Walrus Mainnet**
+- Stores and verifies synthetic memory records on **Walrus Testnet**; the authenticated Mainnet publishing path is being prepared for deployment and funding.
 
 ### Screens
 
@@ -80,7 +80,7 @@ The product improves the more you use it. After enough activity the “What chan
 - Live monitoring of a real high-value ETH hot wallet
 - Tatum live data integration working
 - Basic expense categorization live
-- Walrus Memory integration in place (memories being written on Mainnet)
+- Walrus Testnet memory initialization verified (12 records, manifest and readback)
 - Chat + Alerts UI ready
 
 > Note: This project was generated and iterated primarily through Tatum AI Builder (limited free prompts), then pushed to GitHub.
@@ -134,36 +134,26 @@ Built for the Tatum × Walrus Total Recall Hackathon – November 2026
 |----------|----------|---------|
 | `TATUM_API_KEY` | Yes | Live balance & transactions |
 | `VITE_CLERK_PUBLISHABLE_KEY` | Optional | Enable signup / login wall |
-| `WALRUS_PUBLISHER_URL` | For Mainnet | e.g. Mainnet publisher URL |
-| `WALRUS_AGGREGATOR_URL` | Optional | Aggregator for reads |
-| `WALRUS_EPOCHS` | Optional | Blob storage epochs (default 5) |
+| `WALRUS_NETWORK` | Optional | `testnet` (default) or `mainnet` |
+| `WALRUS_PUBLISHER_URL` | Mainnet | HTTPS URL of your private authenticated publisher |
+| `WALRUS_AGGREGATOR_URL` | Optional | Aggregator for reads; Mainnet defaults to the public Mainnet aggregator |
+| `WALRUS_MEMORY_EPOCHS` | Optional | Storage epochs (default 10; bounded by the backend) |
+| `WALRUS_JWT_SECRET` | Mainnet | 32+ character shared secret; must match publisher JWT verification secret |
+| `WALRUS_MAINNET_ADMIN_TOKEN` | Mainnet | Separate random 32+ character operator token; never expose as a Vite variable |
+| `WALRUS_SUI_OWNER_ADDRESS` | Optional | Sui address to receive created blob objects |
 
 ### Seed ≥10 Walrus memories
 
-After deploy, call once:
+Open the Memory tab and initialize the 12 synthetic demo records. The app uses a resumable sequence of plan, record, snapshot, and finalization requests; the browser checkpoints each returned blob ID so a retry can resume safely.
 
-```
-POST /api/tatum/memory/seed
-```
-
-Or open the Memory tab — the first load will auto-seed. Check `publishedCount` and `blobId` fields in the response.
-
-For **Mainnet**, set `WALRUS_PUBLISHER_URL` to the Mainnet publisher endpoint in Vercel env vars and redeploy, then hit `/api/tatum/memory/seed` again.
+For Mainnet, follow [`ops/walrus-publisher/README.md`](./ops/walrus-publisher/README.md) to deploy a private authenticated publisher, then configure the Mainnet Vercel environment variables. Mainnet writes require a short-lived operator session in the Memory tab and a funded publisher wallet. A configured endpoint alone does not prove that the publisher is online or funded.
 
 ---
 
-## Walrus Mainnet owner wallet
+## Walrus Mainnet publishing status
 
-Configured Sui address (will own blob objects when Mainnet writes are enabled):
+The application supports a private authenticated Mainnet publisher using short-lived HS256 JWTs. The operator token is exchanged for a 15-minute HttpOnly, SameSite=Strict cookie; it is not written to localStorage or embedded in the frontend build.
 
-```
-0x66ef4fe9c04d9da0f1645d7255774aed557d27ebc2c59da1049c6757ee9cec65
-```
+The Mainnet publisher is a separate service and must be deployed with a dedicated Sui wallet. It requires both SUI for gas and WAL for storage. The repository contains a provider-neutral Linux/systemd and Nginx deployment package under [`ops/walrus-publisher/`](./ops/walrus-publisher/).
 
-Override with env: `SUI_MEMORY_OWNER`
-
-### Current write path
-- **Now:** public **Testnet** publisher (works without funds)
-- **After refill:** set `WALRUS_PUBLISHER_URL` to a Mainnet-capable path (private publisher or funded upload flow) and re-run `POST /api/tatum/memory/seed`
-
-Every published memory payload includes this owner address and uses `send_object_to` when the publisher supports it.
+**Current verified storage milestone:** 12 synthetic records on Walrus Testnet. Mainnet deployment, wallet funding, and a successful Mainnet write are separate milestones and must not be represented as completed until verified.
